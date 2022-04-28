@@ -61,7 +61,6 @@ export default function(ws, timeKeeper, timeChecker) {
 	let dNonce
 	let m1Hash
 	let m2Hash
-	let m1m2Hash
 	let sessionKey
 	let hostPub
 	let signKeyPair
@@ -69,8 +68,6 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	timeKeeper = (timeKeeper) ? timeKeeper : getTimeKeeper(util.currentTimeMs)
 	timeChecker = (timeChecker) ? timeChecker : getTimeChecker(util.currentTimeMs)
-
-	let telemetry
 	let saltState
 
 	// Set by calling corresponding set-function
@@ -87,13 +84,11 @@ export default function(ws, timeKeeper, timeChecker) {
 		dNonce = undefined
 		m1Hash = undefined
 		m2Hash = undefined
-		m1m2Hash = undefined
 		sessionKey = undefined
 		hostPub = undefined
 		signKeyPair = undefined
 		ephemeralKeyPair = undefined
 
-		telemetry = undefined
 		let state = saltState
 		saltState = STATE_CLOSED
 
@@ -115,18 +110,6 @@ export default function(ws, timeKeeper, timeChecker) {
 		dNonce = new Uint8Array(nacl.secretbox.nonceLength)
 		eNonce[0] = 1
 		dNonce[0] = 2
-
-		telemetry = {
-			bytes: 	{
-					sent: 0,
-					received: 0
-				},
-			handshake: {
-					start: 0,
-					end: 0,
-					total: 0
-				}
-		}
 
 		saltState = STATE_INIT
 	}
@@ -274,20 +257,43 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	// =============== HANDSHAKE BEGIN =================
 
-	function handshake(sigKeyPair, ephKeyPair, hostSigPub) {
+	async function handshake(sigKeyPair, ephKeyPair, hostSigPub) {
 		verifySigKeyPair(sigKeyPair)
 		verifyEphKeyPair(ephKeyPair)
 		verifyHostSigPub(hostSigPub)
-		if (saltState === STATE_INIT) {
-			telemetry.handshake.start = util.currentTimeMs().toFixed(2) - 0
-			signKeyPair = sigKeyPair
-			ephemeralKeyPair = ephKeyPair
-			hostPub = hostSigPub
-			saltState = STATE_HAND
-			sendM1()
-		} else {
+		if (saltState !== STATE_INIT) {
 			throw new Error('Handshake: Invalid internal state: ' + saltState)
 		}
+		signKeyPair = sigKeyPair
+		ephemeralKeyPair = ephKeyPair
+		hostPub = hostSigPub
+		saltState = STATE_HAND
+
+		let readQueue = util.waitQueue();
+		ws.onmessage = function(event){
+			readQueue.push(new Uint8Array(event.data));
+		}
+		async function receive(waitTime){
+			return (await readQueue.pull(waitTime))[0];
+		}
+
+		sendM1()
+		let m2 = await receive(1000)
+		handleM2(m2)
+		let m3 = await receive(1000)
+		handleM3(m3)
+		sendM4()
+		
+
+		ws.onmessage = function(evt) {
+			onmsg(evt.data)
+		}
+		handshakeComplete()
+	}
+
+	function errorAndThrow(msg){
+		error(msg)
+		throw new Error(msg)
 	}
 
 	function verifySigKeyPair(keyPair) {
@@ -353,34 +359,22 @@ export default function(ws, timeKeeper, timeChecker) {
 		}
 		m1Hash = nacl.hash(m1)
 
-		ws.onmessage = function(evt) {
-			handleM2(evt.data)
-		}
-
 		sendOnWs(m1.buffer)
 	}
 
-	function handleM2(data) {
+	function handleM2(m2) {
 		if (saltState !== STATE_HAND) {
-    		error('M2: Invalid internal state: ' + saltState)
-    		return
+    		errorAndThrow('M2: Invalid internal state: ' + saltState)
     	}
-
-		telemetry.bytes.received += data.byteLength
-
-		// V2 of SaltChannel
-		let m2 = new Uint8Array(data)
 
 		// Header
 		if (validHeader(m2, 2, 0)) {
 
 		} else if (validHeader(m2, 2, 129)) {
-			error('M2: NoSuchServer exception')
-			return;
+			errorAndThrow('M2: NoSuchServer exception')
 		} else {
-			error('M2: Bad packet header. Expected 2 0 or 2 129, was '
+			errorAndThrow('M2: Bad packet header. Expected 2 0 or 2 129, was '
 				+ m2[0] + ' ' + m2[1])
-			return
 		}
 
 		// Time
@@ -388,8 +382,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		if (time === 0) {
 			timeChecker = getNullTimeChecker()
 		} else if (time !== 1){
-			error('M2: Invalid time value ' + time)
-			return
+			errorAndThrow('M2: Invalid time value ' + time)
 		}
 
 		let serverPub = getUints(m2, 32, 6)
@@ -397,46 +390,35 @@ export default function(ws, timeKeeper, timeChecker) {
 		sessionKey = nacl.box.before(serverPub, ephemeralKeyPair.secretKey)
 
 		m2Hash = nacl.hash(m2)
-
-		ws.onmessage = function(evt) {
-			handleM3(evt.data)
-		}
 	}
 
 	function handleM3(data) {
 		if (saltState !== STATE_HAND) {
-    		error('M3: Invalid internal state: ' + saltState)
-    		return
+    		errorAndThrow('M3: Invalid internal state: ' + saltState)
     	}
 
-		telemetry.bytes.received += data.byteLength
-
-		let b = new Uint8Array(data)
-		let m3 = decrypt(b)
+		let m3 = decrypt(data)
 
 		if (!m3) {
-			return
+			errorAndThrow('EncryptedMessage: Could not decrypt message')
 		}
 		// Header
 		if (!validHeader(m3, 3, 0)) {
-			error('M3: Bad packet header. Expected 3 0, was ' +
+			errorAndThrow('M3: Bad packet header. Expected 3 0, was ' +
 				m3[0] + ' ' + m3[1])
-			return
 		}
 
 		// Time
 		let time = getInt32(m3, 2)
 		if (timeChecker.delayed(time)) {
-			error('M3: Detected delayed packet')
-			return
+			errorAndThrow('M3: Detected delayed packet')
 		}
 
 		let serverPub = getUints(m3, 32, 6)
 
 		if (hostPub) {
 			if (!util.uint8ArrayEquals(serverPub, hostPub)) {
-				error('M3: ServerSigKey does not match expected')
-				return
+				errorAndThrow('M3: ServerSigKey does not match expected')
 			}
 		}
 
@@ -454,12 +436,8 @@ export default function(ws, timeKeeper, timeChecker) {
 		let success = nacl.sign.detached.verify(concat, signature, serverPub)
 
 		if (!success) {
-			error('M3: Could not verify signature')
-    		return
+			errorAndThrow('M3: Could not verify signature')
 		}
-
-		sendM4()
-
 	}
 
 	function sendM4() {
@@ -485,12 +463,6 @@ export default function(ws, timeKeeper, timeChecker) {
 		let encrypted = encrypt(false, m4)
 
 		sendOnWs(encrypted.buffer)
-
-		ws.onmessage = function(evt) {
-			onmsg(evt.data)
-		}
-
-		handshakeComplete()
 	}
 
 	// =================================================
@@ -516,10 +488,6 @@ export default function(ws, timeKeeper, timeChecker) {
 		onclose = callback
 	}
 	// =================================================
-
-	function getTelemetry() {
-		return telemetry
-	}
 
 	function getState() {
 		switch (ws.readyState) {
@@ -548,9 +516,6 @@ export default function(ws, timeKeeper, timeChecker) {
 	function handshakeComplete() {
 		saltState = STATE_READY
 		let end = util.currentTimeMs().toFixed(2) - 0
-		let start = telemetry.handshake.start
-
-		telemetry.handshake = end - start
 
 		if (typeof onHandshakeComplete === 'function') {
 			onHandshakeComplete()
@@ -566,7 +531,6 @@ export default function(ws, timeKeeper, timeChecker) {
 		}
 
 		let bytes = new Uint8Array(data)
-		telemetry.bytes.received += bytes.byteLength
 
 		let clear = decrypt(bytes)
 
@@ -630,7 +594,6 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	function sendOnWs(message) {
 		if (message instanceof ArrayBuffer) {
-			telemetry.bytes.sent += message.byteLength
 			ws.send(message)
 		} else {
 			throw new TypeError('Must only send ArrayBuffer on WebSocket')
@@ -849,7 +812,6 @@ export default function(ws, timeKeeper, timeChecker) {
 		handshake: handshake,
 		send: send,
 
-		getTelemetry: getTelemetry,
 		getState: getState,
 
 		setOnA2Response: setOnA2Response,
