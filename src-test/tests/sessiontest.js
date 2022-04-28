@@ -76,7 +76,7 @@ let sc
 let time
 let timeKeeper
 
-exports.run = () => {
+export function run(){
 	console.log('======= SESSION TESTS STARTING! =======')
 
 	session1()

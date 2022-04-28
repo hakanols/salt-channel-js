@@ -1,0 +1,13 @@
+{
+  "name": "saltchannel",
+  "version": "1.0.0",
+  "description": "TBD",
+  "main": "TBD",
+  "type": "module",
+  "scripts": {
+    "test": "node src-test/run.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": ""
+}

@@ -31,7 +31,7 @@ let badLength
 let badByte
 let errorMsg
 
-exports.run = () => {
+export function run(){
 	console.log('======= A1A2 TESTS STARTING =======')
 
 	mockSocket.send = validateA1Any

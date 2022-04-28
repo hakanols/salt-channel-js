@@ -86,7 +86,7 @@ let timeKeeper
 let timeChecker
 
 
-exports.run = () => {
+export function run(){
     console.log('======= HANDSHAKE TESTS STARTING! =======')
 
     testMinimal()
