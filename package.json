@@ -5,7 +5,8 @@
   "main": "TBD",
   "type": "module",
   "scripts": {
-    "test": "node src-test/run.js"
+    "test": "node src-test/runAll.js",
+    "browser": "node src-test/browser-quick-start.js /src-test/runJs.html?file=runAll.js"
   },
   "keywords": [],
   "author": "",
