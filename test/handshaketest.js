@@ -92,8 +92,7 @@ async function testServerSide(t, testInterface, validateM1){
     testInterface.send(sendM2())
     testInterface.send(sendM3())
     let m4 = await testInterface.receive(1000)
-    let m4Array = new Uint8Array(m4)
-    t.equal(m4Array.length, 120, 'Check m4 length')
+    validateM4(t, m4)
 }
 
 
@@ -157,11 +156,13 @@ test('minimal', async function (t) {
     })
     sc.setOnClose(doNothing)
 
-    testServerSide(t, testInterface, validateM1NoServSigKey)
+    let serverPromise = testServerSide(t, testInterface, validateM1NoServSigKey)
 
     await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
 
     t.equal(sc.getState(), 'ready', 'State is OPEN')
+
+    await serverPromise;
 
 	t.end();
 });
@@ -176,11 +177,13 @@ test('withServSigKey', async function (t) {
     })
     sc.setOnClose(doNothing)
 
-    testServerSide(t, testInterface, validateM1WithServSigKey)
+    let serverPromise = testServerSide(t, testInterface, validateM1WithServSigKey)
 
     await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey);
 
     t.equal(sc.getState(), 'ready', 'State is OPEN')
+
+    await serverPromise;
 
 	t.end();
 });
@@ -195,11 +198,13 @@ test('sendAppPacket1', async function (t) {
     })
     sc.setOnClose(doNothing)
 
-    testServerSide(t, testInterface, validateM1NoServSigKey)
+    let serverPromise = testServerSide(t, testInterface, validateM1NoServSigKey)
 
     await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
 
     t.equal(sc.getState(), 'ready', 'State is OPEN')
+
+    await serverPromise;
 
     sc.send(false, new Uint8Array([0]).buffer)
     let app1 = await testInterface.receive(1000)
@@ -711,7 +716,7 @@ function validateM1WithServSigKey(t, message) {
     cEpoch = util.currentTimeMs()
 
     let publicEphemeral = new Uint8Array(m1.buffer, 10, 32)
-    t.ok (util.uint8ArrayEquals(publicEphemeral, clientEphKeyPair.publicKey), 'Unexpected public ephemeral key from client')
+    t.ok( util.uint8ArrayEquals(publicEphemeral, clientEphKeyPair.publicKey), 'Unexpected public ephemeral key from client')
 
     let serverSigKey = new Uint8Array(m1.buffer, 42, 32)
     t.ok( util.uint8ArrayEquals(serverSigKey, serverSigKeyPair.publicKey), 'Expected server sig key from client')
@@ -903,34 +908,19 @@ function sendBadM3() {
     sendOnMockSocket(encrypted)
 }
 
-function validateM4(message) {
-    if (!(message instanceof ArrayBuffer)) {
-        outcome(false, '  Expected ArrayBuffer from Salt Channel')
-        return
-    }
+function validateM4(t, message) {
+    t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
+
     let encryptedMessage = new Uint8Array(message)
     let m4 = decrypt(encryptedMessage)
 
-    if (util.isString(m4)) {
-        outcome(false, m4)
-        return
-    }
+    t.ok(!util.isString(m4), m4)
 
-    if (m4[0] !== 4) {
-        outcome(false, '  M4: Bad packet type, expected 4, was ' + m4[0])
-        return
-    }
+    t.equal(m4[0], 4, 'M4: Bad packet type, expected 4, was ' + m4[0])
 
-    if (m4[1] !== 0) {
-        outcome(false, '  M4: Bad packet header, expected 0, was ' + m4[1])
-        return
-    }
+    t.equal(m4[1], 0, 'M4: Bad packet header, expected 0, was ' + m4[1])
 
-    if (m4[2] === 0 && m4[3] === 0
-      && m4[4] === 0 && m4[5] === 0) {
-        outcome(false, '  M4: Expected time to be set')
-        return
-    }
+    t.ok(!(m4[2] === 0 && m4[3] === 0 && m4[4] === 0 && m4[5] === 0), 'M4: Expected time to be set')
 
     let time = new Uint8Array(4)
     time[0] = m4[2]
@@ -940,20 +930,14 @@ function validateM4(message) {
 
     time = (new Int32Array(time.buffer))[0]
 
-    if (util.currentTimeMs() - cEpoch > time + threshold ) {
-        outcome(false, '  M4: Delayed packet')
-        return
-    }
+    t.ok(!(util.currentTimeMs() - cEpoch > time + threshold ), 'M4: Delayed packet')
 
     let clientSigKey = new Uint8Array(32)
     for (let i = 0; i < 32; i++) {
         clientSigKey[i] = m4[6+i]
     }
 
-    if (!util.uint8ArrayEquals(clientSigKey, clientSigKeyPair.publicKey)) {
-        outcome(false, '  Client signing key does not match expected')
-        return
-    }
+    t.ok(util.uint8ArrayEquals(clientSigKey, clientSigKeyPair.publicKey), 'Client signing key does not match expected')
 
     let signature = new Uint8Array(64)
     for (let i = 0; i < 64; i++) {
@@ -964,10 +948,7 @@ function validateM4(message) {
 
     let success = nacl.sign.detached.verify(concat, signature, clientSigKey)
 
-    if (!success) {
-        outcome(false, '  Could not verify signature')
-        return
-    }
+    t.ok(success, 'Could not verify signature')
 }
 
 // ==================================================================
@@ -1085,7 +1066,7 @@ function validateAppPacket(t, message) {
 
     time = (new Int32Array(time.buffer))[0]
 
-    t.ok( (util.currentTimeMs() - cEpoch > time + threshold), 'AppPacket delayed')
+    t.ok(!(util.currentTimeMs() - cEpoch > time + threshold), 'AppPacket delayed')
 
     t.equal(appPacket[6], 0, 'Unexpected data')
 }
