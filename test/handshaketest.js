@@ -214,32 +214,84 @@ test('sendAppPacket1', async function (t) {
 });
 
 test('sendAppPacket2', async function (t) {
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey)
-    mockSocket.send = validateAppPacket
+    let [mockSocketInterface, testInterface] = createMockSocket()
+    testInterface.setState(mockSocketInterface.OPEN)
 
-    sendAppPacket2()
+    sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+    sc.setOnError(function(err) {
+        t.fail('Got error: '+err)
+    })
+    sc.setOnClose(doNothing)
+
+    let serverPromise = testServerSide(t, testInterface, validateM1NoServSigKey)
+
+    await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
+
+    t.equal(sc.getState(), 'ready', 'State is OPEN')
+
+    await serverPromise;
+
+    sc.send(false, [new Uint8Array([0])])
+    let app2 = await testInterface.receive(1000)
+    validateAppPacket(t, app2)
+
 	t.end();
 });
 
 test('receiveAppPacket', async function (t) {
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey)
+    let [mockSocketInterface, testInterface] = createMockSocket()
+    testInterface.setState(mockSocketInterface.OPEN)
 
-    sc.setOnMessage(receiveZeroByte)
-    receiveAppPacket()
+    sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+    sc.setOnError(function(err) {
+        t.fail('Got error: '+err)
+    })
+    sc.setOnClose(doNothing)
+
+    let serverPromise = testServerSide(t, testInterface, validateM1NoServSigKey)
+
+    await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
+
+    t.equal(sc.getState(), 'ready', 'State is OPEN')
+
+    await serverPromise;
+
+    let appPacket = getAppPacket()
+    let encrypted = encrypt(appPacket)
+    testInterface.send(encrypted)
+
+    let message = await sc.receive(1000)
+    receiveZeroByte(t, message)
+
 	t.end();
 });
 
 test('sendMultiAppPacket1', async function (t) {
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey)
+    let [mockSocketInterface, testInterface] = createMockSocket()
+    testInterface.setState(mockSocketInterface.OPEN)
 
-    mockSocket.send = validateMultiAppPacket
+    sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+    sc.setOnError(function(err) {
+        t.fail('Got error: '+err)
+    })
+    sc.setOnClose(doNothing)
 
-    sendMultiAppPacket1()
+    let serverPromise = testServerSide(t, testInterface, validateM1NoServSigKey)
+
+    await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
+
+    t.equal(sc.getState(), 'ready', 'State is OPEN')
+
+    await serverPromise;
+
+    sc.send(false, [new Uint8Array([0]).buffer, new Uint8Array([1])])
+    let multiApp = await testInterface.receive(1000)
+    validateMultiAppPacket(t, multiApp)
 	t.end();
 });
 
 test('sendMultiAppPacket2', async function (t) {
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey)
+    await newSaltChannelAndHandshake(t, validateM1NoServSigKey)
 
     mockSocket.send = validateMultiAppPacket
 
@@ -248,7 +300,7 @@ test('sendMultiAppPacket2', async function (t) {
 });
 
 test('testSendBigMultiAppPacket', async function (t) {
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey)
+    await newSaltChannelAndHandshake(t, validateM1NoServSigKey)
 
     mockSocket.send = validateBigMultiAppPacket
 
@@ -260,7 +312,7 @@ test('receiveMultiAppPacket', async function (t) {
     multiAppPacketCount = 0;
     multiAppPacketFailed = false;
 
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey)
+    await newSaltChannelAndHandshake(t, validateM1NoServSigKey)
 
     sc.setOnMessage(receiveTwoAppPacketData)
     receiveMultiAppPacket()
@@ -270,7 +322,7 @@ test('receiveMultiAppPacket', async function (t) {
 test('receiveBadEncryption', async function (t) {
     const errorMsg = 'EncryptedMessage: Could not decrypt message'
 
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey, errorMsg)
+    await newSaltChannelAndHandshake(t, validateM1NoServSigKey, errorMsg)
 
     receiveBadEncryption()
 	t.end();
@@ -288,7 +340,7 @@ test('receiveDelayed', async function (t) {
 
     threshold = 20
     timeChecker = getTimeChecker(util.currentTimeMs, 10)
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey)
+    await newSaltChannelAndHandshake(t, validateM1NoServSigKey)
 
     receiveDelayedPacket()
     timeChecker = undefined
@@ -302,7 +354,7 @@ test('handShakeAfterError', async function (t) {
 });
 
 test('receiveLastFlag', async function (t) {
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey)
+    await newSaltChannelAndHandshake(t, validateM1NoServSigKey)
     sc.setOnMessage(receiveZeroByte)
 
     receiveLastFlag()
@@ -315,7 +367,7 @@ test('stateAfterReceivedLastFlag', function (t) {
 });
 
 test('sendLastFlag', async function (t) {
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey)
+    await newSaltChannelAndHandshake(t, validateM1NoServSigKey)
 
     mockSocket.send = validateAppPacketWithLastFlag
 
@@ -329,7 +381,7 @@ test('stateAfterSentLastFlag', function (t) {
 });
 
 test('withBadServSigKey', async function (t) {
-    throws(await newSaltChannelAndHandshake(t, null, validateM1BadServSigKey, null, new Uint8Array(32)),
+    throws(await newSaltChannelAndHandshake(t, validateM1BadServSigKey, null, new Uint8Array(32)),
         'M2: NoSuchServer exception')
 });
 
@@ -337,7 +389,7 @@ test('receiveBadHeaderEnc1', async function (t) {
     const errorMsg = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 1 0'
     badData = new Uint8Array([1, 0])
 
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey, errorMsg)
+    await newSaltChannelAndHandshake(t, validateM1NoServSigKey, errorMsg)
     receivebadHeaderEnc()
 	t.end();
 });
@@ -346,7 +398,7 @@ test('receiveBadHeaderEnc2', async function (t) {
     const errorMsg = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 6 2'
     badData = new Uint8Array([6, 2])
 
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey, errorMsg)
+    await newSaltChannelAndHandshake(t, validateM1NoServSigKey, errorMsg)
     receivebadHeaderEnc()
 	t.end();
 });
@@ -355,7 +407,7 @@ test('receiveBadHeaderApp1', async function (t) {
     const errorMsg = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 0 0'
     badData = new Uint8Array([0, 0])
 
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey, errorMsg)
+    await newSaltChannelAndHandshake(t, validateM1NoServSigKey, errorMsg)
     receivebadHeaderApp()
 	t.end();
 });
@@ -364,7 +416,7 @@ test('receiveBadHeaderApp2', async function (t) {
     const errorMsg = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 5 1'
     badData = new Uint8Array([5, 1])
 
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey, errorMsg)
+    await newSaltChannelAndHandshake(t, validateM1NoServSigKey, errorMsg)
     receivebadHeaderApp()
 	t.end();
 });
@@ -373,7 +425,7 @@ test('receiveBadHeaderApp3', async function (t) {
     const errorMsg = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 11 1'
     badData = new Uint8Array([11, 1])
 
-    await newSaltChannelAndHandshake(t, doNothing, validateM1NoServSigKey, errorMsg)
+    await newSaltChannelAndHandshake(t, validateM1NoServSigKey, errorMsg)
     receivebadHeaderApp()
 	t.end();
 });
@@ -382,7 +434,7 @@ test('receiveBadHeaderM21', async function (t) {
     const errorMsg = 'M2: Bad packet header. Expected 2 0 or 2 129, was 3 0'
     badData = new Uint8Array([3, 0])
 
-    t.throws(await newSaltChannelAndHandshake(t, null, sendBadM2, errorMsg),
+    t.throws(await newSaltChannelAndHandshake(t, sendBadM2, errorMsg),
         errorMsg)
 	t.end();
 });
@@ -391,7 +443,7 @@ test('receiveBadHeaderM22', async function (t) {
     const errorMsg = 'M2: Bad packet header. Expected 2 0 or 2 129, was 2 50'
     badData = new Uint8Array([2, 50])
 
-    t.throws(await newSaltChannelAndHandshake(t, null, sendBadM2, errorMsg),
+    t.throws(await newSaltChannelAndHandshake(t, sendBadM2, errorMsg),
         errorMsg)
 	t.end();
 });
@@ -400,7 +452,7 @@ test('receiveBadTimeM2', async function (t) {
     const errorMsg = 'M2: Invalid time value 20'
     badData = new Uint8Array([2, 0, 20])
 
-    t.throws(await newSaltChannelAndHandshake(t, null, sendBadM2, errorMsg),
+    t.throws(await newSaltChannelAndHandshake(t, sendBadM2, errorMsg),
         errorMsg)
 	t.end();
 });
@@ -409,7 +461,7 @@ test('receiveBadHeaderM31', async function (t) {
     const errorMsg = 'M3: Bad packet header. Expected 3 0, was 0 0'
     badData = new Uint8Array([0, 0])
 
-    t.throws(await newSaltChannelAndHandshake(t, null, sendBadM3, errorMsg),
+    t.throws(await newSaltChannelAndHandshake(t, sendBadM3, errorMsg),
         errorMsg)
 	t.end();
 });
@@ -418,7 +470,7 @@ test('receiveBadHeaderM32', async function (t) {
     const errorMsg = 'M3: Bad packet header. Expected 3 0, was 3 1'
     badData = new Uint8Array([3, 1])
 
-    t.throws(await newSaltChannelAndHandshake(t, null, sendBadM3, errorMsg),
+    t.throws(await newSaltChannelAndHandshake(t, sendBadM3, errorMsg),
         errorMsg)
 	t.end();
 });
@@ -427,7 +479,7 @@ test('receiveBadHeaderM33', async function (t) {
     const errorMsg = 'M3: ServerSigKey does not match expected'
     badData = new Uint8Array([3, 0, 20, 0, 0, 0, 12, 23, 34, 56])
 
-    t.throws(await newSaltChannelAndHandshake(t, null, sendBadM3, errorMsg, serverSigKeyPair.publicKey),
+    t.throws(await newSaltChannelAndHandshake(t, sendBadM3, errorMsg, serverSigKeyPair.publicKey),
         errorMsg)
 	t.end();
 });
@@ -436,19 +488,19 @@ test('receiveBadHeaderM34', async function (t) {
     const errorMsg = 'M3: Could not verify signature'
     badData = new Uint8Array([3, 0, 20, 0, 0, 0, 12, 23, 34, 56])
 
-    t.throws(await newSaltChannelAndHandshake(t, null, sendBadM3, errorMsg),
+    t.throws(await newSaltChannelAndHandshake(t, sendBadM3, errorMsg),
         errorMsg)
 	t.end();
 });
 
 test('receiveBadPubEph', async function (t) {
     const errorMsg = 'EncryptedMessage: Could not decrypt message'
-    t.throws(await newSaltChannelAndHandshake(t, null, sendBadEphM2, errorMsg),
+    t.throws(await newSaltChannelAndHandshake(t, sendBadEphM2, errorMsg),
         errorMsg)
 	t.end();
 });
 
-async function newSaltChannelAndHandshake(t, handshakeCompleteCb, validateM1, errorMsg, sigKey) {
+async function newSaltChannelAndHandshake(t, validateM1, errorMsg, sigKey) {
     eNonce = new Uint8Array(nacl.secretbox.nonceLength)
     dNonce = new Uint8Array(nacl.secretbox.nonceLength)
     eNonce[0] = 2
@@ -459,7 +511,6 @@ async function newSaltChannelAndHandshake(t, handshakeCompleteCb, validateM1, er
     mockSocket.readyState = 1
 
     sc = saltChannelSession(mockSocket, timeKeeper, timeChecker)
-    sc.setOnHandshakeComplete(handshakeCompleteCb)
     sc.setOnError(function(err) {
         if (!errorMsg){
             t.ok(err.message === errorMsg, err.message)
@@ -491,14 +542,6 @@ function doNothing() {
     // Do nothing
 }
 
-function sendAppPacket2() {
-    if (sc.getState() !== 'ready') {
-        outcome(false, 'Status: ' + sc.getState())
-        return;
-    }
-    sc.send(false, [new Uint8Array([0])])
-}
-
 function receiveAppPacket() {
     let appPacket = getAppPacket()
     let encrypted = encrypt(appPacket)
@@ -518,24 +561,9 @@ function getAppPacket() {
     return appPacket
 }
 
-function receiveZeroByte(message) {
-    if (!(message instanceof ArrayBuffer)) {
-        outcome(false, '  Expected ArrayBuffer from Salt Channel')
-        return
-    }
-    if (util.uint8ArrayEquals(new Uint8Array(message), new Uint8Array(1))) {
-        outcome(true);
-    } else {
-        outcome(false, '  Expected 1 zero byte, was ' + util.buf2hex(message));
-    }
-}
-
-function sendMultiAppPacket1() {
-    if (sc.getState() !== 'ready') {
-        outcome(false, 'Status: ' + sc.getState())
-        return;
-    }
-    sc.send(false, [new Uint8Array([0]).buffer, new Uint8Array([1])])
+function receiveZeroByte(t, message) {
+    t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
+    t.ok(util.uint8ArrayEquals(new Uint8Array(message), new Uint8Array(1)), 'Expected 1 zero byte, was ' + util.ab2hex(message));
 }
 
 function sendMultiAppPacket2() {
@@ -1071,7 +1099,7 @@ function validateAppPacket(t, message) {
     t.equal(appPacket[6], 0, 'Unexpected data')
 }
 
-function validateMultiAppPacket(message) {
+function validateMultiAppPacket(t, message) {
     if (!(message instanceof ArrayBuffer)) {
         outcome(false, '  Expected ArrayBuffer from Salt Channel')
         return

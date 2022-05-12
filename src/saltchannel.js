@@ -65,6 +65,7 @@ export default function(ws, timeKeeper, timeChecker) {
 	let hostPub
 	let signKeyPair
 	let ephemeralKeyPair
+	let readQueue = util.waitQueue();
 
 	timeKeeper = (timeKeeper) ? timeKeeper : getTimeKeeper(util.currentTimeMs)
 	timeChecker = (timeChecker) ? timeChecker : getTimeChecker(util.currentTimeMs)
@@ -73,8 +74,6 @@ export default function(ws, timeKeeper, timeChecker) {
 	// Set by calling corresponding set-function
 	let onerror
 	let onA2Response
-	let onHandshakeComplete
-	let onmessage
 	let onclose
 
 	init()
@@ -112,6 +111,10 @@ export default function(ws, timeKeeper, timeChecker) {
 		dNonce[0] = 2
 
 		saltState = STATE_INIT
+	}
+
+	async function receive(waitTime){
+		return (await readQueue.pull(waitTime))[0];
 	}
 
 	// =========== A1A2 MESSAGE EXCHANGE ================
@@ -269,18 +272,18 @@ export default function(ws, timeKeeper, timeChecker) {
 		hostPub = hostSigPub
 		saltState = STATE_HAND
 
-		let readQueue = util.waitQueue();
+		let handshakeReadQueue = util.waitQueue();
 		ws.onmessage = function(event){
-			readQueue.push(new Uint8Array(event.data));
+			handshakeReadQueue.push(new Uint8Array(event.data));
 		}
-		async function receive(waitTime){
-			return (await readQueue.pull(waitTime))[0];
+		async function handshakeReceive(waitTime){
+			return (await handshakeReadQueue.pull(waitTime))[0];
 		}
 
 		sendM1()
-		let m2 = await receive(1000)
+		let m2 = await handshakeReceive(1000)
 		handleM2(m2)
-		let m3 = await receive(1000)
+		let m3 = await handshakeReceive(1000)
 		handleM3(m3)
 		sendM4()
 		
@@ -288,7 +291,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		ws.onmessage = function(evt) {
 			onmsg(evt.data)
 		}
-		handshakeComplete()
+		saltState = STATE_READY
 	}
 
 	function errorAndThrow(msg){
@@ -476,14 +479,6 @@ export default function(ws, timeKeeper, timeChecker) {
     	onerror = callback
     }
 
-    function setOnHandshakeComplete(callback) {
-    	onHandshakeComplete = callback
-    }
-
-	function setOnmessage(callback) {
-		onmessage = callback
-	}
-
 	function setOnclose(callback) {
 		onclose = callback
 	}
@@ -511,17 +506,6 @@ export default function(ws, timeKeeper, timeChecker) {
 		}
 
 		close()
-	}
-
-	function handshakeComplete() {
-		saltState = STATE_READY
-		let end = util.currentTimeMs().toFixed(2) - 0
-
-		if (typeof onHandshakeComplete === 'function') {
-			onHandshakeComplete()
-		} else {
-			console.error('saltchannel.onHandshakeComplete not set')
-		}
 	}
 
 	function onmsg(data) {
@@ -566,11 +550,6 @@ export default function(ws, timeKeeper, timeChecker) {
 			return
 		}
 
-		if (typeof onmessage !== 'function') {
-			console.error('saltchannel.onMessage not set')
-			return
-		}
-
 		let offset = 2 + 4 + 2
 		for (let i = 0; i < count; i++) {
 			let length = getUint16(multiAppPacket, offset)
@@ -579,17 +558,14 @@ export default function(ws, timeKeeper, timeChecker) {
 			let data = getUints(multiAppPacket, length, offset)
 			offset += length
 
-			onmessage(data.buffer)
+			readQueue.push(data.buffer);
 		}
 	}
 
 	function handleAppPacket(appPacket) {
-		if (typeof onmessage !== 'function') {
-			console.error('saltchannel.onMessage not set')
-			return
-		}
+
 		let data = getUints(appPacket, appPacket.length - 6, 6)
-		onmessage(data.buffer)
+		readQueue.push(data.buffer);
 	}
 
 	function sendOnWs(message) {
@@ -811,13 +787,12 @@ export default function(ws, timeKeeper, timeChecker) {
 		a1a2: a1a2,
 		handshake: handshake,
 		send: send,
+		receive: receive,
 
 		getState: getState,
 
 		setOnA2Response: setOnA2Response,
 		setOnError: setOnerror,
-		setOnHandshakeComplete: setOnHandshakeComplete,
-		setOnMessage: setOnmessage,
 		setOnClose: setOnclose
 	}
 }
