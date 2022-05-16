@@ -107,26 +107,11 @@ let threshold
 let sc
 let m1Hash
 let m2Hash
+
 const SIG_STR_1 = 'SC-SIG01'
 const SIG_STR_2 = 'SC-SIG02'
-
-let sigBytes1 = new Uint8Array([ SIG_STR_1.charCodeAt(0)
-                            ,SIG_STR_1.charCodeAt(1)
-                            ,SIG_STR_1.charCodeAt(2)
-                            ,SIG_STR_1.charCodeAt(3)
-                            ,SIG_STR_1.charCodeAt(4)
-                            ,SIG_STR_1.charCodeAt(5)
-                            ,SIG_STR_1.charCodeAt(6)
-                            ,SIG_STR_1.charCodeAt(7)])
-
-let sigBytes2 = new Uint8Array([ SIG_STR_2.charCodeAt(0)
-                            ,SIG_STR_2.charCodeAt(1)
-                            ,SIG_STR_2.charCodeAt(2)
-                            ,SIG_STR_2.charCodeAt(3)
-                            ,SIG_STR_2.charCodeAt(4)
-                            ,SIG_STR_2.charCodeAt(5)
-                            ,SIG_STR_2.charCodeAt(6)
-                            ,SIG_STR_2.charCodeAt(7)])
+const sigBytes1 = [...SIG_STR_1].map(letter=>letter.charCodeAt(0))
+const sigBytes2 = [...SIG_STR_2].map(letter=>letter.charCodeAt(0))
 
 let badData
 let multiAppPacketCount
@@ -291,11 +276,26 @@ test('sendMultiAppPacket1', async function (t) {
 });
 
 test('sendMultiAppPacket2', async function (t) {
-    await newSaltChannelAndHandshake(t, validateM1NoServSigKey)
+    let [mockSocketInterface, testInterface] = createMockSocket()
+    testInterface.setState(mockSocketInterface.OPEN)
 
-    mockSocket.send = validateMultiAppPacket
+    sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+    sc.setOnError(function(err) {
+        t.fail('Got error: '+err)
+    })
+    sc.setOnClose(doNothing)
 
-    sendMultiAppPacket2()
+    let serverPromise = testServerSide(t, testInterface, validateM1NoServSigKey)
+
+    await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
+
+    t.equal(sc.getState(), 'ready', 'State is OPEN')
+
+    await serverPromise;
+
+    sc.send(false, new Uint8Array([0]), new Uint8Array([1]).buffer)
+    let multiApp = await testInterface.receive(1000)
+    validateMultiAppPacket(t, multiApp)
 	t.end();
 });
 
@@ -513,7 +513,7 @@ async function newSaltChannelAndHandshake(t, validateM1, errorMsg, sigKey) {
     sc = saltChannelSession(mockSocket, timeKeeper, timeChecker)
     sc.setOnError(function(err) {
         if (!errorMsg){
-            t.ok(err.message === errorMsg, err.message)
+            t.equal(err.message, errorMsg, err.message)
         }
     })
     sc.setOnClose(doNothing)
@@ -563,15 +563,7 @@ function getAppPacket() {
 
 function receiveZeroByte(t, message) {
     t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
-    t.ok(util.uint8ArrayEquals(new Uint8Array(message), new Uint8Array(1)), 'Expected 1 zero byte, was ' + util.ab2hex(message));
-}
-
-function sendMultiAppPacket2() {
-    if (sc.getState() !== 'ready') {
-        outcome(false, 'Status: ' + sc.getState())
-        return;
-    }
-    sc.send(false, new Uint8Array([0]), new Uint8Array([1]).buffer)
+    t.arrayEqual(new Uint8Array(message), new Uint8Array(1), 'Expected 1 zero byte, was ' + util.ab2hex(message));
 }
 
 function sendBigMultiAppPacket() {
@@ -705,20 +697,16 @@ function validateM1NoServSigKey(t, message) {
 
     t.equal( m1.length, 42, 'Bad packet length')
 
-    let protocol = String.fromCharCode(m1[0])
-    protocol += String.fromCharCode(m1[1])
-    protocol += String.fromCharCode(m1[2])
-    protocol += String.fromCharCode(m1[3])
-
+    let protocol = String.fromCharCode(...m1.slice(0,4))
     t.equal(protocol, 'SCv2', 'Bad protocol indicator')
     t.equal(m1[4], 1, 'Invalid packet type')
     t.equal(m1[5], 0, 'Unexpected server sig key included')
-    t.ok((m1[6] === 1 && m1[7] === 0 && m1[8] === 0 && m1[9] === 0), '  M1: Expected time to be set: ' +util.ab2hex(m1.buffer))
+    t.arrayEqual(m1.slice(6, 10), [1, 0, 0, 0], 'M1: Expected time to be set: ' +util.ab2hex(m1.buffer))
 
     cEpoch = util.currentTimeMs()
 
-    let publicEphemeral = new Uint8Array(m1.buffer, 10)
-    t.ok (util.uint8ArrayEquals(publicEphemeral, clientEphKeyPair.publicKey), 'Unexpected public ephemeral key from client')
+    let publicEphemeral = m1.slice(10)
+    t.arrayEqual(publicEphemeral, clientEphKeyPair.publicKey, 'Unexpected public ephemeral key from client')
 
     sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
 
@@ -731,23 +719,19 @@ function validateM1WithServSigKey(t, message) {
 
     t.equal( m1.length, 74, 'Bad packet length')
 
-    let protocol = String.fromCharCode(m1[0])
-    protocol += String.fromCharCode(m1[1])
-    protocol += String.fromCharCode(m1[2])
-    protocol += String.fromCharCode(m1[3])
-
+    let protocol = String.fromCharCode(...m1.slice(0, 4))
     t.equal(protocol, 'SCv2', 'Bad protocol indicator')
     t.equal(m1[4], 1, 'Invalid packet type')
     t.equal(m1[5], 1, 'Expected server sig key included')
-    t.ok((m1[6] === 1 && m1[7] === 0 && m1[8] === 0 && m1[9] === 0), '  M1: Expected time to be set: ' +util.ab2hex(m1.buffer))
+    t.arrayEqual(m1.slice(6, 10), [1, 0, 0, 0], 'M1: Expected time to be set: ' +util.ab2hex(m1.buffer))
 
     cEpoch = util.currentTimeMs()
 
-    let publicEphemeral = new Uint8Array(m1.buffer, 10, 32)
-    t.ok( util.uint8ArrayEquals(publicEphemeral, clientEphKeyPair.publicKey), 'Unexpected public ephemeral key from client')
+    let publicEphemeral = m1.slice(10, 42)
+    t.arrayEqual( publicEphemeral, clientEphKeyPair.publicKey, 'Unexpected public ephemeral key from client')
 
-    let serverSigKey = new Uint8Array(m1.buffer, 42, 32)
-    t.ok( util.uint8ArrayEquals(serverSigKey, serverSigKeyPair.publicKey), 'Expected server sig key from client')
+    let serverSigKey = m1.slice(42, 74)
+    t.arrayEqual( serverSigKey, serverSigKeyPair.publicKey, 'Expected server sig key from client')
 
     sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
 
@@ -766,10 +750,7 @@ function validateM1BadServSigKey(message) {
         return
     }
 
-    let protocol = String.fromCharCode(bytes[0])
-    protocol += String.fromCharCode(bytes[1])
-    protocol += String.fromCharCode(bytes[2])
-    protocol += String.fromCharCode(bytes[3])
+    let protocol = String.fromCharCode(...bytes.slice(0, 4))
 
     if (protocol !== 'SCv2') {
         outcome(false, '  Bad protocol indicator: ' + protocol)
@@ -965,7 +946,7 @@ function validateM4(t, message) {
         clientSigKey[i] = m4[6+i]
     }
 
-    t.ok(util.uint8ArrayEquals(clientSigKey, clientSigKeyPair.publicKey), 'Client signing key does not match expected')
+    t.arrayEqual(clientSigKey, clientSigKeyPair.publicKey, 'Client signing key does not match expected')
 
     let signature = new Uint8Array(64)
     for (let i = 0; i < 64; i++) {
@@ -1100,68 +1081,30 @@ function validateAppPacket(t, message) {
 }
 
 function validateMultiAppPacket(t, message) {
-    if (!(message instanceof ArrayBuffer)) {
-        outcome(false, '  Expected ArrayBuffer from Salt Channel')
-        return
-    }
+     t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
     let encryptedMessage = new Uint8Array(message)
     let multiAppPacket = decrypt(encryptedMessage)
 
-    if (multiAppPacket.length !== 14) {
-        outcome(false, '  Expected MultiAppPacket.length 14, was ' + multiAppPacket.length)
-        return
-    }
-    if (multiAppPacket[0] !== 11) {
-        outcome(false, ' Expected MultiAppPacket type, was ' + multiAppPacket[0])
-        return
-    }
-    if (multiAppPacket[1] !== 0) {
-        outcome(false, '  Expected zero byte, was ' + multiAppPacket[1])
-        return
-    }
+    t.equal(multiAppPacket.length, 14, 'Expected MultiAppPacket.length 14, was ' + multiAppPacket.length)
+    t.equal(multiAppPacket[0], 11, 'Expected MultiAppPacket type, was ' + multiAppPacket[0])
+    t.equal(multiAppPacket[1], 0, 'Expected zero byte, was ' + multiAppPacket[1])
 
-    let time = new Uint8Array(4)
-    time[0] = multiAppPacket[2]
-    time[1] = multiAppPacket[3]
-    time[2] = multiAppPacket[4]
-    time[3] = multiAppPacket[5]
-
+    let time = multiAppPacket.slice(2,6)
     time = (new Int32Array(time.buffer))[0]
 
-    if (util.currentTimeMs() - cEpoch > time + threshold ) {
-        outcome(false, '  MultiAppPacket delayed')
-        return
-    }
+    t.ok(!(util.currentTimeMs() - cEpoch > time + threshold), 'AppPacket delayed')
 
-    if (multiAppPacket[6] !== 2 || multiAppPacket[7] !== 0) {
-        outcome(false, '  Unexpected count, expected 2 0, was ' +
+    t.arrayEqual(multiAppPacket.slice(6, 8), [2, 0], 'Unexpected count, expected 2 0, was ' +
                 multiAppPacket[6] + ' ' + multiAppPacket[7])
-        return
-    }
-
-    if (multiAppPacket[8] !== 1 || multiAppPacket[9] !== 0) {
-        outcome(false, '  Unexpected length, expected 1 0, was ' +
+    t.arrayEqual(multiAppPacket.slice(8, 10), [1, 0], 'Unexpected length, expected 1 0, was ' +
             multiAppPacket[8] + ' ' + multiAppPacket[9])
-        return
-    }
 
-    if (multiAppPacket[10] !== 0) {
-        outcome(false, '  Unexpected data, expected 0, was ' + multiAppPacket[10])
-        return
-    }
+    t.equal(multiAppPacket[10], 0, 'Unexpected data, expected 0, was ' + multiAppPacket[10])
 
-    if (multiAppPacket[11] !== 1 || multiAppPacket[12] !== 0) {
-        outcome(false, '  Unexpected length, expected 1 0, was ' +
+    t.arrayEqual(multiAppPacket.slice(11, 13), [1, 0], 'Unexpected length, expected 1 0, was ' +
             multiAppPacket[11] + ' ' + multiAppPacket[12])
-        return
-    }
 
-    if (multiAppPacket[13] !== 1) {
-        outcome(false, '  Unexpected data, expected 1, was ' + multiAppPacket[13])
-        return
-    }
-
-    outcome(true)
+    t.equal(multiAppPacket[13], 1, 'Unexpected data, expected 1, was ' + multiAppPacket[13])
 }
 
 function validateBigMultiAppPacket(message) {
