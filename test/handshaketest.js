@@ -114,8 +114,6 @@ const sigBytes1 = [...SIG_STR_1].map(letter=>letter.charCodeAt(0))
 const sigBytes2 = [...SIG_STR_2].map(letter=>letter.charCodeAt(0))
 
 let badData
-let multiAppPacketCount
-let multiAppPacketFailed
 let lastFlag
 
 let bigPayload = util.hex2ab('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +
@@ -218,22 +216,48 @@ test('testSendBigMultiAppPacket', async function (t) {
 });
 
 test('receiveMultiAppPacket', async function (t) {
-    multiAppPacketCount = 0;
-    multiAppPacketFailed = false;
+    let [sc, testInterface] = await standardHandshake(t)
 
-    await newSaltChannelAndHandshake(t, validateM1NoServSigKey)
+    let multiAppPacket = getMultiAppPacket()
+    let encrypted = encrypt(multiAppPacket)
+    testInterface.send(encrypted)
 
-    sc.setOnMessage(receiveTwoAppPacketData)
-    receiveMultiAppPacket()
+    let multiApp1 = await sc.receive(1000)
+    let multiApp2 = await sc.receive(1000)
+
+    t.ok((multiApp1 instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
+    t.arrayEqual(new Uint8Array(multiApp1), new Uint8Array([0]), 'Unexpected data')
+
+    t.ok((multiApp2 instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
+    t.arrayEqual(new Uint8Array(multiApp2), new Uint8Array([1]), 'Unexpected data')
+
 	t.end();
 });
 
 test('receiveBadEncryption', async function (t) {
     const errorMsg = 'EncryptedMessage: Could not decrypt message'
+    let [sc, testInterface] = await standardHandshake(t)
 
-    await newSaltChannelAndHandshake(t, validateM1NoServSigKey, errorMsg)
+    sc.setOnError(function(err) {
+        t.equal(err.message, errorMsg, err.message)
+    })
 
-    receiveBadEncryption()
+    let appPacket = new Uint8Array(7)
+    appPacket[0] = 5
+
+    let time = new Int32Array([util.currentTimeMs() - sEpoch])
+    time = new Uint8Array(time.buffer)
+
+    appPacket.set(time, 2)
+
+    let encrypted = encrypt(appPacket)
+
+    encrypted[5] = 0
+    encrypted[6] = 0
+    encrypted[7] = 0
+
+    testInterface.send(encrypted)
+
 	t.end();
 });
 
@@ -475,12 +499,6 @@ function receiveZeroByte(t, message) {
     t.arrayEqual(new Uint8Array(message), new Uint8Array(1), 'Expected 1 zero byte, was ' + util.ab2hex(message));
 }
 
-function receiveMultiAppPacket() {
-    let multiAppPacket = getMultiAppPacket()
-    let encrypted = encrypt(multiAppPacket)
-
-    sendOnMockSocket(encrypted)
-}
 
 function getMultiAppPacket() {
     let multiAppPacket = new Uint8Array(14)
@@ -498,44 +516,6 @@ function getMultiAppPacket() {
     multiAppPacket.set(time, 2)
 
     return multiAppPacket
-}
-
-function receiveTwoAppPacketData(message) {
-    if (!(message instanceof ArrayBuffer)) {
-        outcome(false, '  Expected ArrayBuffer from Salt Channel')
-        return
-    }
-    if (util.uint8ArrayEquals(new Uint8Array(message), new Uint8Array([multiAppPacketCount++]))) {
-        if (multiAppPacketCount === 2 && !multiAppPacketFailed) {
-            outcome(true);
-        }
-    } else {
-        outcome(false, '  Expected 1 zero byte, was ' + util.buf2hex(message));
-        multiAppPacketFailed = true
-    }
-}
-
-function receiveBadEncryption() {
-    if (sc.getState() !== 'ready') {
-        outcome(false, 'Status: ' + sc.getState())
-        return;
-    }
-
-    let appPacket = new Uint8Array(7)
-    appPacket[0] = 5
-
-    let time = new Int32Array([util.currentTimeMs() - sEpoch])
-    time = new Uint8Array(time.buffer)
-
-    appPacket.set(time, 2)
-
-    let encrypted = encrypt(appPacket)
-
-    encrypted[5] = 0
-    encrypted[6] = 0
-    encrypted[7] = 0
-
-    sendOnMockSocket(encrypted)
 }
 
 function receiveDelayedPacket() {
