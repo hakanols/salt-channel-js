@@ -79,12 +79,8 @@ function createMockSocket(){
 	return [ mockSocketInterface, testInterface ]
 }
 
-async function testServerSide(t, testInterface, validateM1){
-        
-    eNonce = new Uint8Array(nacl.secretbox.nonceLength)
-    dNonce = new Uint8Array(nacl.secretbox.nonceLength)
-    eNonce[0] = 2
-    dNonce[0] = 1
+async function testServerSide(t, testInterface, validateM1){        
+    serverData = createServerData();
     lastFlag = false
 
     let m1 = await testInterface.receive(1000)
@@ -95,10 +91,31 @@ async function testServerSide(t, testInterface, validateM1){
     validateM4(t, m4)
 }
 
+function createErrorWaiter(sc){
+    let errorQueue = util.waitQueue();
+    sc.setOnError(function(err) {
+        errorQueue.push(err.message);
+    })
+    return async function(waitTime){
+        return (await errorQueue.pull(waitTime))[0];
+    }
+}
 
-let sessionKey
-let eNonce
-let dNonce
+function createServerData(){
+    let eNonce = new Uint8Array(nacl.secretbox.nonceLength)
+    let dNonce = new Uint8Array(nacl.secretbox.nonceLength)
+    eNonce[0] = 2
+    dNonce[0] = 1
+    let sessionKey;
+
+    return {
+        eNonce: eNonce,
+        dNonce: dNonce,
+        sessionKey: sessionKey
+    }
+}
+
+let serverData;
 
 let cEpoch
 let sEpoch
@@ -126,8 +143,6 @@ let bigPayload = util.hex2ab('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +
     '77777777777777777777777777777777777777778888888888888888888888888888888888888888' +
     '9999999999999999999999999999999999999999ffffffffffffffffffffffffffffffffffffffff')
 
-let timeKeeper
-let timeChecker
 
 test('minimal', async function (t) {
     await standardHandshake(t)
@@ -138,7 +153,7 @@ test('withServSigKey', async function (t) {
     let [mockSocketInterface, testInterface] = createMockSocket()
     testInterface.setState(mockSocketInterface.OPEN)
 
-    sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+    let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
     sc.setOnError(function(err) {
         t.fail('Got error: '+err)
     })
@@ -235,54 +250,96 @@ test('receiveMultiAppPacket', async function (t) {
 });
 
 test('receiveBadEncryption', async function (t) {
-    const errorMsg = 'EncryptedMessage: Could not decrypt message'
-    let [sc, testInterface] = await standardHandshake(t)
+    let [sc, testInterface] = await standardHandshake(t);
+    let errorWaiter = createErrorWaiter(sc);
 
-    sc.setOnError(function(err) {
-        t.equal(err.message, errorMsg, err.message)
-    })
-
-    let appPacket = new Uint8Array(7)
-    appPacket[0] = 5
+    let appPacket1 = new Uint8Array(7)
+    appPacket1[0] = 5
 
     let time = new Int32Array([util.currentTimeMs() - sEpoch])
     time = new Uint8Array(time.buffer)
 
-    appPacket.set(time, 2)
+    appPacket1.set(time, 2)
 
-    let encrypted = encrypt(appPacket)
+    let encrypted1 = encrypt(appPacket1)
 
-    encrypted[5] = 0
-    encrypted[6] = 0
-    encrypted[7] = 0
+    encrypted1[5] = 0
+    encrypted1[6] = 0
+    encrypted1[7] = 0
 
-    testInterface.send(encrypted)
+    testInterface.send(encrypted1)
 
-	t.end();
-});
+    let receivedError1 = await errorWaiter(1000) 
+    const errorMsg1 = 'EncryptedMessage: Could not decrypt message'   
+    t.equal(receivedError1, errorMsg1, "Expect error")
 
-test('receiveAfterError', async function (t) {
-    const errorMsg = 'Received message when salt channel was not ready'
+    console.log('receiveAfterError')
+    let appPacket2 = getAppPacket()
+    let encrypted2 = encrypt(appPacket2)
+    testInterface.send(encrypted2)
 
-    receiveAppPacket()
+    let receivedError2 = await errorWaiter(1000) 
+    const errorMsg2 = 'Received message when salt channel was not ready' 
+    t.equal(receivedError2, errorMsg2, "Expect error")
+
 	t.end();
 });
 
 test('receiveDelayed', async function (t) {
-    const errorMsg = '(Multi)AppPacket: Detected a delayed packet'
+    let [mockSocketInterface, testInterface] = createMockSocket()
+    testInterface.setState(mockSocketInterface.OPEN)
+
+    let timeChecker = getTimeChecker(util.currentTimeMs, 10)
+    let sc = saltChannelSession(mockSocketInterface, undefined, timeChecker)
+    let errorWaiter = createErrorWaiter(sc);
+
+    sc.setOnClose(doNothing)
+
+    let serverPromise = testServerSide(t, testInterface, validateM1NoServSigKey)
+
+    await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
+
+    t.equal(sc.getState(), 'ready', 'State is OPEN')
+
+    await serverPromise;
 
     threshold = 20
-    timeChecker = getTimeChecker(util.currentTimeMs, 10)
-    await newSaltChannelAndHandshake(t, validateM1NoServSigKey)
 
-    receiveDelayedPacket()
-    timeChecker = undefined
-    threshold = undefined
-	t.end();
-});
+    let appPacket = getAppPacket()
+    appPacket[2] = 2    // Time
+    appPacket[3] = 0
+    appPacket[4] = 0
+    appPacket[5] = 0
+    let encrypted = encrypt(appPacket)
+    testInterface.send(encrypted)
 
-test('handShakeAfterError', async function (t) {
-    await handshakeAfterError(t)
+    let receivedError1 = await errorWaiter(1000) 
+    const errorMsg1 = '(Multi)AppPacket: Detected a delayed packet'
+    t.equal(receivedError1, errorMsg1, "Expect error")
+
+    console.log('handShakeAfterError')
+    serverData = createServerData();
+    lastFlag = false
+
+    const errorMsg2 = 'Handshake: Invalid internal state: closed'
+
+    async function catchPromiseThrow(t, promise, expectedError){
+        try {
+            await promise;
+            t.fail("")
+        } catch (error) {
+            
+            t.equal(expectedError, error.message, "Expect error")
+        }
+    }
+    
+
+    //await catchPromiseThrow(t, sc.handshake(clientSigKeyPair, clientEphKeyPair), errorMsg2)
+    t.throws(async function(){await sc.handshake(clientSigKeyPair, clientEphKeyPair)}, errorMsg2)
+
+    let receivedError2 = await errorWaiter(1000)
+    t.equal(receivedError2, errorMsg2, "Expect error")
+    
 	t.end();
 });
 
@@ -434,16 +491,13 @@ test('receiveBadPubEph', async function (t) {
 });
 
 async function newSaltChannelAndHandshake(t, validateM1, errorMsg, sigKey) {
-    eNonce = new Uint8Array(nacl.secretbox.nonceLength)
-    dNonce = new Uint8Array(nacl.secretbox.nonceLength)
-    eNonce[0] = 2
-    dNonce[0] = 1
+    serverData = createServerData();
     lastFlag = false
 
     mockSocket.send = validateM1
     mockSocket.readyState = 1
 
-    sc = saltChannelSession(mockSocket, timeKeeper, timeChecker)
+    let sc = saltChannelSession(mockSocket, undefined, timeChecker)
     sc.setOnError(function(err) {
         if (!errorMsg){
             t.equal(err.message, errorMsg, err.message)
@@ -454,32 +508,8 @@ async function newSaltChannelAndHandshake(t, validateM1, errorMsg, sigKey) {
     await sc.handshake(clientSigKeyPair, clientEphKeyPair, sigKey)
 }
 
-async function handshakeAfterError(t) {
-    eNonce = new Uint8Array(nacl.secretbox.nonceLength)
-    dNonce = new Uint8Array(nacl.secretbox.nonceLength)
-    eNonce[0] = 2
-    dNonce[0] = 1
-    lastFlag = false
-
-    const errorMsg = 'Handshake: Invalid internal state: closed'
-
-    mockSocket.send = validateM1NoServSigKey
-
-    sc.setOnHandshakeComplete(doNothing)
-
-    t.throws(await sc.handshake(clientSigKeyPair, clientEphKeyPair),
-        errorMsg)
-}
-
 function doNothing() {
     // Do nothing
-}
-
-function receiveAppPacket() {
-    let appPacket = getAppPacket()
-    let encrypted = encrypt(appPacket)
-
-    sendOnMockSocket(encrypted)
 }
 
 function getAppPacket() {
@@ -516,23 +546,6 @@ function getMultiAppPacket() {
     multiAppPacket.set(time, 2)
 
     return multiAppPacket
-}
-
-function receiveDelayedPacket() {
-    if (sc.getState() !== 'ready') {
-        outcome(false, 'Status: ' + sc.getState())
-        return;
-    }
-
-    let appPacket = getAppPacket()
-
-    appPacket[2] = 2    // Time
-    appPacket[3] = 0
-    appPacket[4] = 0
-    appPacket[5] = 0
-
-    let encrypted = encrypt(appPacket)
-    sendOnMockSocket(encrypted)
 }
 
 function receiveLastFlag() {
@@ -589,7 +602,7 @@ function validateM1NoServSigKey(t, message) {
     let publicEphemeral = m1.slice(10)
     t.arrayEqual(publicEphemeral, clientEphKeyPair.publicKey, 'Unexpected public ephemeral key from client')
 
-    sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
+    serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
 
     m1Hash = nacl.hash(m1)
 }
@@ -614,7 +627,7 @@ function validateM1WithServSigKey(t, message) {
     let serverSigKey = m1.slice(42, 74)
     t.arrayEqual( serverSigKey, serverSigKeyPair.publicKey, 'Expected server sig key from client')
 
-    sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
+    serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
 
     m1Hash = nacl.hash(m1)
 }
@@ -669,7 +682,7 @@ function validateM1BadServSigKey(message) {
         return
     }
 
-    sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
+    serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
 
     m1Hash = nacl.hash(bytes)
 
@@ -728,7 +741,7 @@ function sendBadM2() {
 
 function sendBadEphM2(m1) {
     let publicEphemeral = new Uint8Array(m1, 10, 32)
-    sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
+    serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
 
     let m2 = new Uint8Array(38)
     m2[0] = 2
@@ -864,8 +877,8 @@ function decrypt(message) {
         bytes[i] = msg[i+2]
     }
 
-    let clear = nacl.secretbox.open(bytes, dNonce, sessionKey)
-    dNonce = increaseNonce2(dNonce)
+    let clear = nacl.secretbox.open(bytes, serverData.dNonce, serverData.sessionKey)
+    serverData.dNonce = increaseNonce2(serverData.dNonce)
 
     if (clear === false) {
         return '  EncryptedMessage: Failed to decrypt'
@@ -879,8 +892,8 @@ function decrypt(message) {
 }
 
 function encrypt(clearBytes, last = false) {
-    let body = nacl.secretbox(clearBytes, eNonce, sessionKey)
-    eNonce = increaseNonce2(eNonce)
+    let body = nacl.secretbox(clearBytes, serverData.eNonce, serverData.sessionKey)
+    serverData.eNonce = increaseNonce2(serverData.eNonce)
 
     let encryptedMessage = new Uint8Array(body.length + 2)
     encryptedMessage[0] = 6
@@ -1064,9 +1077,9 @@ async function  standardHandshake(t){
     let [mockSocketInterface, testInterface] = createMockSocket()
     testInterface.setState(mockSocketInterface.OPEN)
 
-    sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+    let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
     sc.setOnError(function(err) {
-        t.fail('Got error: '+err)
+        t.fail('Got error: '+err.message)
     })
     sc.setOnClose(doNothing)
 
