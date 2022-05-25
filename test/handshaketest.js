@@ -4,23 +4,53 @@ import nacl from '../lib/nacl-fast-es.js';
 import getTimeChecker from '../src/time/typical-time-checker.js';
 import test from './tap-esm.js'
 
-let clientSecret =
+const clientSecret =
     util.hex2ab('fd2956eb37782aabddc97eaf3b9e1b075f4976770db56c11e866e8763fa073d8' +
                         '9cace2ed6af2e108bbabc69c0bb7f3e62a4c0bf59ac2296811a09e480bf7b0f7')
-let clientSigKeyPair = nacl.sign.keyPair.fromSecretKey(clientSecret)
-let clientEphKeyPair = {
+const clientSigKeyPair = nacl.sign.keyPair.fromSecretKey(clientSecret)
+const clientEphKeyPair = {
     publicKey: util.hex2ab('159205ede53fe5334eaf26f15f80710453b6600e6df5c96bfb85dd593c86cf4f'),
     secretKey: util.hex2ab('e9f639ffd6cc1c1edd5ba28e0aecbbe15ad88478dbfcebc09ad80300880a3fa2')
     }
 
-let serverSecret =
+const serverSecret =
     util.hex2ab('7a772fa9014b423300076a2ff646463952f141e2aa8d98263c690c0d72eed52d' +
                         '07e28d4ee32bfdc4b07d41c92193c0c25ee6b3094c6296f373413b373d36168b')
-let serverSigKeyPair = nacl.sign.keyPair.fromSecretKey(serverSecret)
-let serverEphKeyPair = {
+const serverSigKeyPair = nacl.sign.keyPair.fromSecretKey(serverSecret)
+const serverEphKeyPair = {
     publicKey: util.hex2ab('354200647ecfbcb1d5feeb7b2f59127fe1278ab4a632b505691f9a2f6a465065'),
     secretKey: util.hex2ab('942d5f9bb23b8380ce9a86ae52600ec675b922b64b1b294c8f94c44255a26fe0')
     }
+
+const SIG_STR_1 = 'SC-SIG01'
+const SIG_STR_2 = 'SC-SIG02'
+const sigBytes1 = [...SIG_STR_1].map(letter=>letter.charCodeAt(0))
+const sigBytes2 = [...SIG_STR_2].map(letter=>letter.charCodeAt(0))
+
+const bigPayload = util.hex2ab('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbcccccccccccccccccccccccccccccccccccccccc' +
+    'ddddddddddddddddddddddddddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' +
+    'ffffffffffffffffffffffffffffffffffffffff0000000000000000000000000000000000000000' +
+    '11111111111111111111111111111111111111112222222222222222222222222222222222222222' +
+    '33333333333333333333333333333333333333334444444444444444444444444444444444444444' +
+    '55555555555555555555555555555555555555556666666666666666666666666666666666666666' +
+    '77777777777777777777777777777777777777778888888888888888888888888888888888888888' +
+    '9999999999999999999999999999999999999999ffffffffffffffffffffffffffffffffffffffff')
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+    
+let serverData;
+
+let cEpoch
+let sEpoch
+let threshold
+
+let m1Hash
+let m2Hash
+
+let badData
+
+//////////////////////////////////////////////////////////////////////////////////////////////
 
 let mockSocket = {
     close: closeMockSocket,
@@ -81,7 +111,6 @@ function createMockSocket(){
 
 async function testServerSide(t, testInterface, validateM1){        
     serverData = createServerData();
-    lastFlag = false
 
     let m1 = await testInterface.receive(1000)
     validateM1(t, m1)
@@ -115,34 +144,7 @@ function createServerData(){
     }
 }
 
-let serverData;
-
-let cEpoch
-let sEpoch
-let threshold
-
-let sc
-let m1Hash
-let m2Hash
-
-const SIG_STR_1 = 'SC-SIG01'
-const SIG_STR_2 = 'SC-SIG02'
-const sigBytes1 = [...SIG_STR_1].map(letter=>letter.charCodeAt(0))
-const sigBytes2 = [...SIG_STR_2].map(letter=>letter.charCodeAt(0))
-
-let badData
-let lastFlag
-
-let bigPayload = util.hex2ab('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +
-    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbcccccccccccccccccccccccccccccccccccccccc' +
-    'ddddddddddddddddddddddddddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' +
-    'ffffffffffffffffffffffffffffffffffffffff0000000000000000000000000000000000000000' +
-    '11111111111111111111111111111111111111112222222222222222222222222222222222222222' +
-    '33333333333333333333333333333333333333334444444444444444444444444444444444444444' +
-    '55555555555555555555555555555555555555556666666666666666666666666666666666666666' +
-    '77777777777777777777777777777777777777778888888888888888888888888888888888888888' +
-    '9999999999999999999999999999999999999999ffffffffffffffffffffffffffffffffffffffff')
-
+//////////////////////////////////////////////////////////////////////////////////////////////
 
 test('minimal', async function (t) {
     await standardHandshake(t)
@@ -198,7 +200,8 @@ test('receiveAppPacket', async function (t) {
     testInterface.send(encrypted)
 
     let message = await sc.receive(1000)
-    receiveZeroByte(t, message)
+    t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
+    t.arrayEqual(new Uint8Array(message), new Uint8Array(1), 'Expected 1 zero byte, was ' + util.ab2hex(message));
 
 	t.end();
 });
@@ -319,24 +322,11 @@ test('receiveDelayed', async function (t) {
 
     console.log('handShakeAfterError')
     serverData = createServerData();
-    lastFlag = false
 
     const errorMsg2 = 'Handshake: Invalid internal state: closed'
-
-    async function catchPromiseThrow(t, promise, expectedError){
-        try {
-            await promise;
-            t.fail("")
-        } catch (error) {
-            
-            t.equal(expectedError, error.message, "Expect error")
-        }
-    }
-    
-
-    //await catchPromiseThrow(t, sc.handshake(clientSigKeyPair, clientEphKeyPair), errorMsg2)
-    t.throws(async function(){await sc.handshake(clientSigKeyPair, clientEphKeyPair)}, errorMsg2)
-
+    t.throws(async function(){
+        await sc.handshake(clientSigKeyPair, clientEphKeyPair)
+    }, errorMsg2)
     let receivedError2 = await errorWaiter(1000)
     t.equal(receivedError2, errorMsg2, "Expect error")
     
@@ -344,29 +334,31 @@ test('receiveDelayed', async function (t) {
 });
 
 test('receiveLastFlag', async function (t) {
-    await newSaltChannelAndHandshake(t, validateM1NoServSigKey)
-    sc.setOnMessage(receiveZeroByte)
+    let [sc, testInterface] = await standardHandshake(t);
 
-    receiveLastFlag()
-	t.end();
-});
+    let appPacket = getAppPacket()
+    let encrypted = encrypt(appPacket, true)
+    testInterface.send(encrypted)
 
-test('stateAfterReceivedLastFlag', function (t) {
-    t.ok(sc.getState() === 'closed', 'State not closed, state: ' + sc.getState())
+    let message = await sc.receive(1000)
+    t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
+    t.arrayEqual(new Uint8Array(message), new Uint8Array(1), 'Expected 1 zero byte, was ' + util.ab2hex(message));
+
+    console.log('stateAfterReceivedLastFlag')
+    t.equal(sc.getState(), 'closed', 'State not closed')
 	t.end();
 });
 
 test('sendLastFlag', async function (t) {
-    await newSaltChannelAndHandshake(t, validateM1NoServSigKey)
+    let [sc, testInterface] = await standardHandshake(t);
 
-    mockSocket.send = validateAppPacketWithLastFlag
+    sc.send(true, new Uint8Array(1));
 
-    sendLastFlag()
-	t.end();
-});
+    let message = await testInterface.receive(1000)
+    validateAppPacketWithLastFlag(t, message)
 
-test('stateAfterSentLastFlag', function (t) {
-    t.ok(sc.getState() === 'closed', 'State not closed, state: ' + sc.getState())
+	console.log('stateAfterSentLastFlag')
+    t.equal(sc.getState(), 'closed', 'State not closed')
 	t.end();
 });
 
@@ -492,12 +484,11 @@ test('receiveBadPubEph', async function (t) {
 
 async function newSaltChannelAndHandshake(t, validateM1, errorMsg, sigKey) {
     serverData = createServerData();
-    lastFlag = false
 
     mockSocket.send = validateM1
     mockSocket.readyState = 1
 
-    let sc = saltChannelSession(mockSocket, undefined, timeChecker)
+    let sc = saltChannelSession(mockSocket, undefined, undefined)
     sc.setOnError(function(err) {
         if (!errorMsg){
             t.equal(err.message, errorMsg, err.message)
@@ -524,11 +515,6 @@ function getAppPacket() {
     return appPacket
 }
 
-function receiveZeroByte(t, message) {
-    t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
-    t.arrayEqual(new Uint8Array(message), new Uint8Array(1), 'Expected 1 zero byte, was ' + util.ab2hex(message));
-}
-
 
 function getMultiAppPacket() {
     let multiAppPacket = new Uint8Array(14)
@@ -546,21 +532,6 @@ function getMultiAppPacket() {
     multiAppPacket.set(time, 2)
 
     return multiAppPacket
-}
-
-function receiveLastFlag() {
-    let appPacket = getAppPacket()
-    let encrypted = encrypt(appPacket, true)
-
-    sendOnMockSocket(encrypted)
-}
-
-function sendLastFlag() {
-    if (sc.getState() !== 'ready') {
-        outcome(false, 'Status: ' + sc.getState())
-        return
-    }
-    sc.send(true, new Uint8Array(1));
 }
 
 function receivebadHeaderEnc() {
@@ -815,7 +786,7 @@ function validateM4(t, message) {
     t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
 
     let encryptedMessage = new Uint8Array(message)
-    let m4 = decrypt(encryptedMessage)
+    let m4 = decrypt(encryptedMessage).data
 
     t.ok(!util.isString(m4), m4)
 
@@ -861,8 +832,9 @@ function validateM4(t, message) {
 // ==================================================================
 
 function decrypt(message) {
+    let lastFlag
     if (message[0] === 6 && message[1] === 0) {
-
+        lastFlag = false
     } else if (message[0] === 6 && message[1] === 128) {
         lastFlag = true
     } else {
@@ -888,7 +860,10 @@ function decrypt(message) {
     for (let i = 0; i < copy.length; i++) {
         copy[i] = clear[i]
     }
-    return copy
+    return {
+        data: copy,
+        last: lastFlag
+    }
 }
 
 function encrypt(clearBytes, last = false) {
@@ -954,19 +929,14 @@ function validateAppPacket(t, message) {
     t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
 
     let encryptedMessage = new Uint8Array(message)
-    let appPacket = decrypt(encryptedMessage)
+    let appPacket = decrypt(encryptedMessage).data
 
-    t.equal(appPacket.length, 7, 'Expected AppPacket.length');
+    t.equal(appPacket.length, 7, 'Expected message length');
 
     t.equal(appPacket[0], 5, 'Expected AppPacket type');
     t.equal(appPacket[1], 0, 'Expected zero byte')
 
-    let time = new Uint8Array(4)
-    time[0] = appPacket[2]
-    time[1] = appPacket[3]
-    time[2] = appPacket[4]
-    time[3] = appPacket[5]
-
+    let time = appPacket.slice(2,6)
     time = (new Int32Array(time.buffer))[0]
 
     t.ok(!(util.currentTimeMs() - cEpoch > time + threshold), 'AppPacket delayed')
@@ -977,9 +947,9 @@ function validateAppPacket(t, message) {
 function validateMultiAppPacket(t, message) {
      t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
     let encryptedMessage = new Uint8Array(message)
-    let multiAppPacket = decrypt(encryptedMessage)
+    let multiAppPacket = decrypt(encryptedMessage).data
 
-    t.equal(multiAppPacket.length, 14, 'Expected MultiAppPacket.length 14, was ' + multiAppPacket.length)
+    t.equal(multiAppPacket.length, 14, 'Expected message length')
     t.equal(multiAppPacket[0], 11, 'Expected MultiAppPacket type, was ' + multiAppPacket[0])
     t.equal(multiAppPacket[1], 0, 'Expected zero byte, was ' + multiAppPacket[1])
 
@@ -988,10 +958,8 @@ function validateMultiAppPacket(t, message) {
 
     t.ok(!(util.currentTimeMs() - cEpoch > time + threshold), 'AppPacket delayed')
 
-    t.arrayEqual(multiAppPacket.slice(6, 8), [2, 0], 'Unexpected count, expected 2 0, was ' +
-                multiAppPacket[6] + ' ' + multiAppPacket[7])
-    t.arrayEqual(multiAppPacket.slice(8, 10), [1, 0], 'Unexpected length, expected 1 0, was ' +
-            multiAppPacket[8] + ' ' + multiAppPacket[9])
+    t.arrayEqual(multiAppPacket.slice(6, 8), [2, 0], 'Unexpected count')
+    t.arrayEqual(multiAppPacket.slice(8, 10), [1, 0], 'Unexpected length')
 
     t.equal(multiAppPacket[10], 0, 'Unexpected data, expected 0, was ' + multiAppPacket[10])
 
@@ -1004,9 +972,9 @@ function validateMultiAppPacket(t, message) {
 function validateBigMultiAppPacket(t, message) {
     t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
     let encryptedMessage = new Uint8Array(message)
-    let multiAppPacket = decrypt(encryptedMessage)
+    let multiAppPacket = decrypt(encryptedMessage).data
 
-    t.equal(multiAppPacket.length, bigPayload.length + 13, 'Expected MultiAppPacket.length ' + (bigPayload.length + 13) + ', was ' + multiAppPacket.length)
+    t.equal(multiAppPacket.length, bigPayload.length + 13, 'Expected message length')
 
     t.arrayEqual(multiAppPacket.slice(6, 8), [2, 0], 'Unexpected count, expected 2 0, was ' +
                 multiAppPacket[6] + ' ' + multiAppPacket[7])
@@ -1027,50 +995,25 @@ function validateBigMultiAppPacket(t, message) {
     t.arrayEqual( payload, bigPayload, 'Unexpected data, expected ' + util.ab2hex(bigPayload.buffer) + ', was ' + util.ab2hex(payload.buffer))
 }
 
-function validateAppPacketWithLastFlag(message) {
-    if (!(message instanceof ArrayBuffer)) {
-        outcome(false, '  Expected ArrayBuffer from Salt Channel')
-        return
-    }
+function validateAppPacketWithLastFlag(t, message) {
+    t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
     let encryptedMessage = new Uint8Array(message)
-    let appPacket = decrypt(encryptedMessage)
 
-    if (appPacket.length !== 7) {
-        outcome(false, '  Expected AppPacket.length 7, was ' + appPacket.length)
-        return
-    }
-    if (appPacket[0] !== 5) {
-        outcome(false, ' Expected AppPacket type, was ' + appPacket[0])
-        return
-    }
-    if (appPacket[1] !== 0) {
-        outcome(false, '  Expected zero byte, was ' + appPacket[1])
-        return
-    }
+    let gris = decrypt(encryptedMessage)
+    let appPacket = gris.data
+    let lastFlag = gris.last
 
-    let time = new Uint8Array(4)
-    time[0] = appPacket[2]
-    time[1] = appPacket[3]
-    time[2] = appPacket[4]
-    time[3] = appPacket[5]
+    t.equal(appPacket.length, 7, 'Expected message length')
+    t.equal(appPacket[0], 5, 'Expected MultiAppPacket type')
+    t.equal(appPacket[1], 0, 'Expected zero byte')
 
+    let time = appPacket.slice(2,6)
     time = (new Int32Array(time.buffer))[0]
 
-    if (util.currentTimeMs() - cEpoch > time + threshold ) {
-        outcome(false, '  AppPacket delayed')
-        return
-    }
+    t.ok(!(util.currentTimeMs() - cEpoch > time + threshold), 'AppPacket delayed')
+    t.arrayEqual(appPacket[6], 0, 'Unexpected data')
 
-    if (appPacket[6] !== 0) {
-        outcome(false, '  Unexpected data, expected 0, was ' + appPacket[6])
-        return
-    }
-
-    if (lastFlag) {
-        outcome(true)
-    } else {
-        outcome(false, '  Expected lastFlag to have been set')
-    }
+    t.ok(lastFlag, 'Last message')
 }
 
 async function  standardHandshake(t){

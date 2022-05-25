@@ -132,14 +132,14 @@ class Tester {
     this._next()
   }
 
-  throws (fn, expected, message = 'should throw') {
+  async throws (fn, expected, message = 'should throw') {
     if (typeof expected === 'string') {
       message = expected
       expected = undefined
     }
     var actual = undefined
     try {
-      fn()
+      await fn()
     } catch (err) {
       actual = err
     }

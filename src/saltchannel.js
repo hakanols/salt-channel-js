@@ -123,7 +123,7 @@ export default function(ws, timeKeeper, timeChecker) {
 			saltState = STATE_A1A2
         	sendA1(adressType, adress)
         } else {
-        	throw new Error('A1A2: Invalid internal state: ' + saltState)
+        	errorAndThrow('A1A2: Invalid internal state: ' + saltState)
         }
     }
 
@@ -265,7 +265,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		verifyEphKeyPair(ephKeyPair)
 		verifyHostSigPub(hostSigPub)
 		if (saltState !== STATE_INIT) {
-			throw new Error('Handshake: Invalid internal state: ' + saltState)
+			errorAndThrow('Handshake: Invalid internal state: ' + saltState)
 		}
 		signKeyPair = sigKeyPair
 		ephemeralKeyPair = ephKeyPair
@@ -656,7 +656,7 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	function send(last, arg) {
 		if (saltState !== STATE_READY) {
-			throw new Error('Invalid state: ' + saltState)
+			errorAndThrow('Invalid state: ' + saltState)
 		}
 		if (last) {
 			saltState = STATE_LAST
@@ -759,11 +759,11 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	function increaseNonce(nonce) {
 		if (!(nonce instanceof Uint8Array)) {
-			throw new Error('Expected Uint8Array. \n\t' +
+			errorAndThrow('Expected Uint8Array. \n\t' +
 						'Input: ' + nonce)
 		}
 		if (!(nonce.length === nacl.secretbox.nonceLength)) {
-			throw new Error('Unexpected nonce length. \n\t' +
+			errorAndThrow('Unexpected nonce length. \n\t' +
 						'Length: ' + nonce.length)
 		}
 		nonce[0] += 1 // nonces are little endian
