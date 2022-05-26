@@ -6,21 +6,21 @@ import test from './tap-esm.js'
 
 const clientSecret =
     util.hex2ab('fd2956eb37782aabddc97eaf3b9e1b075f4976770db56c11e866e8763fa073d8' +
-                        '9cace2ed6af2e108bbabc69c0bb7f3e62a4c0bf59ac2296811a09e480bf7b0f7')
+                '9cace2ed6af2e108bbabc69c0bb7f3e62a4c0bf59ac2296811a09e480bf7b0f7')
 const clientSigKeyPair = nacl.sign.keyPair.fromSecretKey(clientSecret)
 const clientEphKeyPair = {
     publicKey: util.hex2ab('159205ede53fe5334eaf26f15f80710453b6600e6df5c96bfb85dd593c86cf4f'),
     secretKey: util.hex2ab('e9f639ffd6cc1c1edd5ba28e0aecbbe15ad88478dbfcebc09ad80300880a3fa2')
-    }
+}
 
 const serverSecret =
     util.hex2ab('7a772fa9014b423300076a2ff646463952f141e2aa8d98263c690c0d72eed52d' +
-                        '07e28d4ee32bfdc4b07d41c92193c0c25ee6b3094c6296f373413b373d36168b')
+                '07e28d4ee32bfdc4b07d41c92193c0c25ee6b3094c6296f373413b373d36168b')
 const serverSigKeyPair = nacl.sign.keyPair.fromSecretKey(serverSecret)
 const serverEphKeyPair = {
     publicKey: util.hex2ab('354200647ecfbcb1d5feeb7b2f59127fe1278ab4a632b505691f9a2f6a465065'),
     secretKey: util.hex2ab('942d5f9bb23b8380ce9a86ae52600ec675b922b64b1b294c8f94c44255a26fe0')
-    }
+}
 
 const SIG_STR_1 = 'SC-SIG01'
 const SIG_STR_2 = 'SC-SIG02'
@@ -45,21 +45,7 @@ let cEpoch
 let sEpoch
 let threshold
 
-let m1Hash
-let m2Hash
-
-let badData
-
 //////////////////////////////////////////////////////////////////////////////////////////////
-
-let mockSocket = {
-    close: closeMockSocket,
-    readyState: 1
-}
-
-function closeMockSocket() {
-    mockSocket.readyState = 3
-}
 
 function createMockSocket(){
 
@@ -114,8 +100,8 @@ async function testServerSide(t, testInterface, validateM1){
 
     let m1 = await testInterface.receive(1000)
     validateM1(t, m1)
-    testInterface.send(sendM2())
-    testInterface.send(sendM3())
+    testInterface.send(createM2())
+    testInterface.send(createM3())
     let m4 = await testInterface.receive(1000)
     validateM4(t, m4)
 }
@@ -161,7 +147,7 @@ test('withServSigKey', async function (t) {
     })
     sc.setOnClose(doNothing)
 
-    let serverPromise = testServerSide(t, testInterface, validateM1WithServSigKey)
+    let serverPromise = testServerSide(t, testInterface, function(t,m1){validateM1WithServSigKey(t,m1,clientEphKeyPair.publicKey,serverSigKeyPair.publicKey)})
 
     await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey);
 
@@ -363,141 +349,154 @@ test('sendLastFlag', async function (t) {
 });
 
 test('withBadServSigKey', async function (t) {
-    throws(await newSaltChannelAndHandshake(t, validateM1BadServSigKey, null, new Uint8Array(32)),
-        'M2: NoSuchServer exception')
+    let m2 = new Uint8Array(38)
+    m2[0] = 2
+    m2[1] = 129 // NoSuchServer & LastFlag
+    // Time is supported
+    m2[2] = 1
+    const expectedError = 'M2: NoSuchServer exception'
+    await testBadM2(t, m2,  new Uint8Array(32), expectedError)
+    t.end();
 });
 
 test('receiveBadHeaderEnc1', async function (t) {
-    const errorMsg = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 1 0'
-    badData = new Uint8Array([1, 0])
-
-    await newSaltChannelAndHandshake(t, validateM1NoServSigKey, errorMsg)
-    receivebadHeaderEnc()
+    let [sc, testInterface] = await standardHandshake(t);
+    let errorWaiter = createErrorWaiter(sc);
+    const expectedError = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 1 0' 
+    const badData = new Uint8Array([1, 0])
+    testInterface.send(createBadHeaderEnc(badData))
+    let receivedError = await errorWaiter(1000)
+    t.equal(receivedError, expectedError, "Expect error")
 	t.end();
 });
 
 test('receiveBadHeaderEnc2', async function (t) {
-    const errorMsg = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 6 2'
-    badData = new Uint8Array([6, 2])
-
-    await newSaltChannelAndHandshake(t, validateM1NoServSigKey, errorMsg)
-    receivebadHeaderEnc()
+    let [sc, testInterface] = await standardHandshake(t);
+    let errorWaiter = createErrorWaiter(sc);
+    const expectedError = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 6 2'
+    const badData = new Uint8Array([6, 2])
+    testInterface.send(createBadHeaderEnc(badData))
+    let receivedError = await errorWaiter(1000)
+    t.equal(receivedError, expectedError, "Expect error")
 	t.end();
 });
 
 test('receiveBadHeaderApp1', async function (t) {
-    const errorMsg = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 0 0'
-    badData = new Uint8Array([0, 0])
-
-    await newSaltChannelAndHandshake(t, validateM1NoServSigKey, errorMsg)
-    receivebadHeaderApp()
+    let [sc, testInterface] = await standardHandshake(t);
+    let errorWaiter = createErrorWaiter(sc);
+    const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 0 0'
+    const badData = new Uint8Array([0, 0])
+    testInterface.send(createBadHeaderApp(badData))
+    let receivedError = await errorWaiter(1000)
+    t.equal(receivedError, expectedError, "Expect error")
 	t.end();
 });
 
 test('receiveBadHeaderApp2', async function (t) {
-    const errorMsg = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 5 1'
-    badData = new Uint8Array([5, 1])
-
-    await newSaltChannelAndHandshake(t, validateM1NoServSigKey, errorMsg)
-    receivebadHeaderApp()
+    let [sc, testInterface] = await standardHandshake(t);
+    let errorWaiter = createErrorWaiter(sc);
+    const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 5 1'
+    const badData = new Uint8Array([5, 1])
+    testInterface.send(createBadHeaderApp(badData))
+    let receivedError = await errorWaiter(1000)
+    t.equal(receivedError, expectedError, "Expect error")
 	t.end();
 });
 
 test('receiveBadHeaderApp3', async function (t) {
-    const errorMsg = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 11 1'
-    badData = new Uint8Array([11, 1])
-
-    await newSaltChannelAndHandshake(t, validateM1NoServSigKey, errorMsg)
-    receivebadHeaderApp()
+    let [sc, testInterface] = await standardHandshake(t);
+    let errorWaiter = createErrorWaiter(sc);
+    const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 11 1'
+    const badData = new Uint8Array([11, 1])
+    testInterface.send(createBadHeaderApp(badData))
+    let receivedError = await errorWaiter(1000)
+    t.equal(receivedError, expectedError, "Expect error")
 	t.end();
 });
 
 test('receiveBadHeaderM21', async function (t) {
-    const errorMsg = 'M2: Bad packet header. Expected 2 0 or 2 129, was 3 0'
-    badData = new Uint8Array([3, 0])
-
-    t.throws(await newSaltChannelAndHandshake(t, sendBadM2, errorMsg),
-        errorMsg)
+    const expectedError = 'M2: Bad packet header. Expected 2 0 or 2 129, was 3 0'
+    const badData = new Uint8Array([3, 0])
+    const m2 = createBadM2(badData)
+    await testBadM2(t, m2, undefined, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderM22', async function (t) {
-    const errorMsg = 'M2: Bad packet header. Expected 2 0 or 2 129, was 2 50'
-    badData = new Uint8Array([2, 50])
-
-    t.throws(await newSaltChannelAndHandshake(t, sendBadM2, errorMsg),
-        errorMsg)
+    const expectedError = 'M2: Bad packet header. Expected 2 0 or 2 129, was 2 50'
+    const badData = new Uint8Array([2, 50])
+    const m2 = createBadM2(badData)
+    await testBadM2(t, m2, undefined, expectedError)
 	t.end();
 });
 
 test('receiveBadTimeM2', async function (t) {
-    const errorMsg = 'M2: Invalid time value 20'
-    badData = new Uint8Array([2, 0, 20])
-
-    t.throws(await newSaltChannelAndHandshake(t, sendBadM2, errorMsg),
-        errorMsg)
+    const expectedError = 'M2: Invalid time value 20'
+    const badData = new Uint8Array([2, 0, 20])
+    const m2 = createBadM2(badData)
+    await testBadM2(t, m2, undefined, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderM31', async function (t) {
-    const errorMsg = 'M3: Bad packet header. Expected 3 0, was 0 0'
-    badData = new Uint8Array([0, 0])
-
-    t.throws(await newSaltChannelAndHandshake(t, sendBadM3, errorMsg),
-        errorMsg)
+    const expectedError = 'M3: Bad packet header. Expected 3 0, was 0 0'
+    const badData = new Uint8Array([0, 0])
+    const [m2, m3] = createBadM3(badData)
+    await testBadM3(t, m2, m3, undefined, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderM32', async function (t) {
-    const errorMsg = 'M3: Bad packet header. Expected 3 0, was 3 1'
-    badData = new Uint8Array([3, 1])
-
-    t.throws(await newSaltChannelAndHandshake(t, sendBadM3, errorMsg),
-        errorMsg)
+    const expectedError = 'M3: Bad packet header. Expected 3 0, was 3 1'
+    const badData = new Uint8Array([3, 1])
+    const [m2, m3] = createBadM3(badData)
+    await testBadM3(t, m2, m3, undefined, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderM33', async function (t) {
-    const errorMsg = 'M3: ServerSigKey does not match expected'
-    badData = new Uint8Array([3, 0, 20, 0, 0, 0, 12, 23, 34, 56])
-
-    t.throws(await newSaltChannelAndHandshake(t, sendBadM3, errorMsg, serverSigKeyPair.publicKey),
-        errorMsg)
+    const expectedError = 'M3: ServerSigKey does not match expected'
+    const badData = new Uint8Array([3, 0, 20, 0, 0, 0, 12, 23, 34, 56])
+    const [m2, m3] = createBadM3(badData)
+    await testBadM3(t, m2, m3, serverSigKeyPair.publicKey, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderM34', async function (t) {
-    const errorMsg = 'M3: Could not verify signature'
-    badData = new Uint8Array([3, 0, 20, 0, 0, 0, 12, 23, 34, 56])
-
-    t.throws(await newSaltChannelAndHandshake(t, sendBadM3, errorMsg),
-        errorMsg)
+    const expectedError = 'M3: Could not verify signature'
+    const badData = new Uint8Array([3, 0, 20, 0, 0, 0, 12, 23, 34, 56])
+    const [m2, m3] = createBadM3(badData)
+    await testBadM3(t, m2, m3, undefined, expectedError)
 	t.end();
 });
 
 test('receiveBadPubEph', async function (t) {
-    const errorMsg = 'EncryptedMessage: Could not decrypt message'
-    t.throws(await newSaltChannelAndHandshake(t, sendBadEphM2, errorMsg),
-        errorMsg)
-	t.end();
-});
+    const expectedError = 'EncryptedMessage: Could not decrypt message'
 
-async function newSaltChannelAndHandshake(t, validateM1, errorMsg, sigKey) {
-    serverData = createServerData();
+    let [mockSocketInterface, testInterface] = createMockSocket()
+    testInterface.setState(mockSocketInterface.OPEN)
 
-    mockSocket.send = validateM1
-    mockSocket.readyState = 1
-
-    let sc = saltChannelSession(mockSocket, undefined, undefined)
-    sc.setOnError(function(err) {
-        if (!errorMsg){
-            t.equal(err.message, errorMsg, err.message)
-        }
-    })
+    let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+    let errorWaiter = createErrorWaiter(sc);
     sc.setOnClose(doNothing)
 
-    await sc.handshake(clientSigKeyPair, clientEphKeyPair, sigKey)
-}
+    let serverPromise = async function(){
+        serverData = createServerData();
+        let m1 = await testInterface.receive(1000)
+        // Skip validating of m1
+        testInterface.send(createBadEphM2(m1))
+        testInterface.send(createM3())
+    }()
+
+    t.throws(async function(){
+        await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined)
+    }, expectedError)
+    let receivedError = await errorWaiter(1000)
+    t.equal(receivedError, expectedError, "Expect error")
+
+    await serverPromise
+	t.end();
+});
 
 function doNothing() {
     // Do nothing
@@ -514,7 +513,6 @@ function getAppPacket() {
 
     return appPacket
 }
-
 
 function getMultiAppPacket() {
     let multiAppPacket = new Uint8Array(14)
@@ -534,20 +532,18 @@ function getMultiAppPacket() {
     return multiAppPacket
 }
 
-function receivebadHeaderEnc() {
+function createBadHeaderEnc(badData) {
     let appPacket = getAppPacket()
     let encrypted = encrypt(appPacket)
     encrypted.set(badData)
-
-    sendOnMockSocket(encrypted)
+    return encrypted
 }
 
-function receivebadHeaderApp() {
+function createBadHeaderApp(badData) {
     let appPacket = getAppPacket()
     appPacket.set(badData)
     let encrypted = encrypt(appPacket)
-
-    sendOnMockSocket(encrypted)
+    return encrypted
 }
 
 // ==================================================================
@@ -575,10 +571,10 @@ function validateM1NoServSigKey(t, message) {
 
     serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
 
-    m1Hash = nacl.hash(m1)
+    serverData.m1Hash = nacl.hash(m1)
 }
 
-function validateM1WithServSigKey(t, message) {
+function validateM1WithServSigKey(t, message, expectedEphKey, expectedServKey) {
     t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
     let m1 = new Uint8Array(message)
 
@@ -593,74 +589,17 @@ function validateM1WithServSigKey(t, message) {
     cEpoch = util.currentTimeMs()
 
     let publicEphemeral = m1.slice(10, 42)
-    t.arrayEqual( publicEphemeral, clientEphKeyPair.publicKey, 'Unexpected public ephemeral key from client')
+    t.arrayEqual( publicEphemeral, expectedEphKey, 'Unexpected public ephemeral key from client')
 
     let serverSigKey = m1.slice(42, 74)
-    t.arrayEqual( serverSigKey, serverSigKeyPair.publicKey, 'Expected server sig key from client')
+    t.arrayEqual( serverSigKey, expectedServKey, 'Expected server sig key from client')
 
     serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
 
-    m1Hash = nacl.hash(m1)
+    serverData.m1Hash = nacl.hash(m1)
 }
 
-function validateM1BadServSigKey(message) {
-    if (!(message instanceof ArrayBuffer)) {
-        outcome(false, '  Expected ArrayBuffer from Salt Channel')
-        return
-    }
-    let bytes = new Uint8Array(message)
-
-    if (bytes.length !== 74) {
-        outcome(false, '  Bad packet length, expected 42, was ' + bytes.length)
-        return
-    }
-
-    let protocol = String.fromCharCode(...bytes.slice(0, 4))
-
-    if (protocol !== 'SCv2') {
-        outcome(false, '  Bad protocol indicator: ' + protocol)
-        return
-    }
-
-    if (bytes[4] !== 1) {
-        outcome(false, '  Invalid packet type, expected 1, was ' + bytes[4])
-        return
-    }
-
-    if(bytes[5] !== 1) {
-        outcome(false, '  Unexpected server sig key included, expected 1, was ' + bytes[5])
-        return
-    }
-
-    if (!(bytes[6] === 1 && bytes[7] === 0 &&
-        bytes[8] === 0 && bytes[9] === 0)) {
-        outcome(false, '  M1: Expected time to be set')
-        return
-    }
-
-    cEpoch = util.currentTimeMs()
-
-    let publicEphemeral = new Uint8Array(bytes.buffer, 10, 32)
-
-    if (!util.uint8ArrayEquals(publicEphemeral, clientEphKeyPair.publicKey)) {
-        outcome(false, '  Unexpected public ephemeral key from client')
-        return
-    }
-
-    let serverSigKey = new Uint8Array(bytes.buffer, 42, 32)
-    if (!util.uint8ArrayEquals(serverSigKey, new Uint8Array(32))) {
-        outcome(false, '  Unexpected server sig key from client')
-        return
-    }
-
-    serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
-
-    m1Hash = nacl.hash(bytes)
-
-    sendM2NoSuchServer()
-}
-
-function sendM2() {
+function createM2() {
     let m2 = new Uint8Array(38)
 
     m2[0] = 2
@@ -672,29 +611,14 @@ function sendM2() {
         m2[6+i] = serverEphKeyPair.publicKey[i]
     }
 
-    m2Hash = nacl.hash(m2)
+    serverData.m2Hash = nacl.hash(m2)
 
     sEpoch = util.currentTimeMs()
 
     return m2;
-
-    //sendOnMockSocket(m2)
-
-    //sendM3()
 }
 
-function sendM2NoSuchServer() {
-    let m2 = new Uint8Array(38)
-
-    m2[0] = 2
-    m2[1] = 129 // NoSuchServer & LastFlag
-    // Time is supported
-    m2[2] = 1
-
-    sendOnMockSocket(m2)
-}
-
-function sendBadM2() {
+function createBadM2(badData) {
     let m2 = new Uint8Array(38)
 
     m2.set(badData)
@@ -703,14 +627,14 @@ function sendBadM2() {
         m2[6+i] = serverEphKeyPair.publicKey[i]
     }
 
-    m2Hash = nacl.hash(m2)
+    serverData.m2Hash = nacl.hash(m2)
 
     sEpoch = util.currentTimeMs()
 
-    sendOnMockSocket(m2)
+    return m2
 }
 
-function sendBadEphM2(m1) {
+function createBadEphM2(m1) {
     let publicEphemeral = new Uint8Array(m1, 10, 32)
     serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
 
@@ -719,21 +643,15 @@ function sendBadEphM2(m1) {
     m2[2] = 1
     m2.set(serverEphKeyPair.publicKey, 6)
     m2[6] = 0
-
-    m2Hash = nacl.hash(m2)
+    serverData.m1Hash = nacl.hash(new Uint8Array(m1))
+    serverData.m2Hash = nacl.hash(m2)
 
     sEpoch = util.currentTimeMs()
 
-    sendOnMockSocket(m2)
-
-    sendM3()
+    return m2
 }
 
-function sendOnMockSocket(data) {
-    mockSocket.onmessage({data: data.buffer})
-}
-
-function sendM3() {
+function createM3() {
     let m3 = new Uint8Array(102)
 
     m3[0] = 3
@@ -742,7 +660,7 @@ function sendM3() {
         m3[6+i] = serverSigKeyPair.publicKey[i]
     }
 
-    let concat = getConcat(sigBytes1)
+    let concat = new Uint8Array([...sigBytes1, ...serverData.m1Hash, ...serverData.m2Hash])
 
     let signature = nacl.sign.detached(concat, serverSigKeyPair.secretKey)
 
@@ -758,14 +676,19 @@ function sendM3() {
     m3[4] = time[2]
     m3[5] = time[3]
 
-    mockSocket.send = validateM4
-
     let encrypted = encrypt(m3)
     return encrypted
-    //sendOnMockSocket(encrypted)
 }
 
-function sendBadM3() {
+function createBadM3(badData) {
+    serverData = createServerData();
+    serverData.sessionKey = new Uint8Array([
+        223, 248,  72,  68, 244,  41, 255,  27,
+         32, 180, 231, 197,   4, 130, 135,  46,
+        253,  65, 203, 210, 125, 183, 210, 233,
+         62, 156, 211,  97,  17, 254, 141, 237
+    ])
+
     let m2 = new Uint8Array(38)
     m2[0] = 2
     m2[2] = 1
@@ -773,13 +696,11 @@ function sendBadM3() {
         m2[6+i] = serverEphKeyPair.publicKey[i]
     }
 
-    sendOnMockSocket(m2)
-
     let m3 = new Uint8Array(102)
     m3.set(badData)
-
     let encrypted = encrypt(m3)
-    sendOnMockSocket(encrypted)
+
+    return [m2, encrypted]
 }
 
 function validateM4(t, message) {
@@ -818,7 +739,7 @@ function validateM4(t, message) {
         signature[i] = m4[38+i]
     }
 
-    let concat = getConcat(sigBytes2)
+    let concat = new Uint8Array([...sigBytes2, ...serverData.m1Hash, ...serverData.m2Hash])
 
     let success = nacl.sign.detached.verify(concat, signature, clientSigKey)
 
@@ -879,19 +800,6 @@ function encrypt(clearBytes, last = false) {
     }
 
     return encryptedMessage
-}
-
-function getConcat(sigBytes) {
-    let concat = new Uint8Array(2*nacl.hash.hashLength + 8)
-    for (let i = 0; i < 8; i++) {
-        concat[i] = sigBytes[i]
-    }
-    for (let i = 0; i < nacl.hash.hashLength; i++) {
-        concat[8+i] = m1Hash[i]
-        concat[8+i+nacl.hash.hashLength] = m2Hash[i]
-    }
-
-    return concat
 }
 
 function increaseNonce(nonce) {
@@ -999,21 +907,19 @@ function validateAppPacketWithLastFlag(t, message) {
     t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
     let encryptedMessage = new Uint8Array(message)
 
-    let gris = decrypt(encryptedMessage)
-    let appPacket = gris.data
-    let lastFlag = gris.last
+    let {data, last} = decrypt(encryptedMessage)
 
-    t.equal(appPacket.length, 7, 'Expected message length')
-    t.equal(appPacket[0], 5, 'Expected MultiAppPacket type')
-    t.equal(appPacket[1], 0, 'Expected zero byte')
+    t.equal(data.length, 7, 'Expected message length')
+    t.equal(data[0], 5, 'Expected MultiAppPacket type')
+    t.equal(data[1], 0, 'Expected zero byte')
 
-    let time = appPacket.slice(2,6)
+    let time = data.slice(2,6)
     time = (new Int32Array(time.buffer))[0]
 
     t.ok(!(util.currentTimeMs() - cEpoch > time + threshold), 'AppPacket delayed')
-    t.arrayEqual(appPacket[6], 0, 'Unexpected data')
+    t.arrayEqual(data[6], 0, 'Unexpected data')
 
-    t.ok(lastFlag, 'Last message')
+    t.ok(last, 'Last message')
 }
 
 async function  standardHandshake(t){
@@ -1037,11 +943,51 @@ async function  standardHandshake(t){
     return [sc, testInterface]
 }
 
-function outcome(success, msg) {
-    if (success) {
-        passCount++
-        //console.log(testCount + '. ' + currentTest + ' PASSED')
-    } else {
-        console.log(testCount + '. ' + currentTest + ' FAILED! \n' + msg)
-    }
+async function testBadM2(t, m2, sigKey, expectedError){
+    let [mockSocketInterface, testInterface] = createMockSocket()
+    testInterface.setState(mockSocketInterface.OPEN)
+
+    let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+    let errorWaiter = createErrorWaiter(sc);
+    sc.setOnClose(doNothing)
+
+    let serverPromise = async function(){
+        serverData = createServerData();
+        await testInterface.receive(1000)
+        // Skip validating of m1
+        testInterface.send(m2)
+    }()
+
+    t.throws(async function(){
+        await sc.handshake(clientSigKeyPair, clientEphKeyPair, sigKey)
+    }, expectedError)
+    let receivedError = await errorWaiter(1000)
+    t.equal(receivedError, expectedError, "Expect error")
+
+    await serverPromise
+}
+
+async function testBadM3(t, m2, m3, sigKey, expectedError){
+    let [mockSocketInterface, testInterface] = createMockSocket()
+    testInterface.setState(mockSocketInterface.OPEN)
+
+    let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+    let errorWaiter = createErrorWaiter(sc);
+    sc.setOnClose(doNothing)
+
+    let serverPromise = async function(){
+        serverData = createServerData();
+        await testInterface.receive(1000)
+        // Skip validating of m1
+        testInterface.send(m2)
+        testInterface.send(m3)
+    }()
+
+    t.throws(async function(){
+        await sc.handshake(clientSigKeyPair, clientEphKeyPair, sigKey)
+    }, expectedError)
+    let receivedError = await errorWaiter(1000)
+    t.equal(receivedError, expectedError, "Expect error")
+
+    await serverPromise
 }
