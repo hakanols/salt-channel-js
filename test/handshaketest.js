@@ -304,7 +304,8 @@ test('receiveDelayed', async function (t) {
 
     let receivedError1 = await errorWaiter(1000) 
     const errorMsg1 = '(Multi)AppPacket: Detected a delayed packet'
-    t.equal(receivedError1, errorMsg1, "Expect error")
+    t.equal(receivedError1, errorMsg1, "Expect error")   
+    threshold = undefined
 
     console.log('## handShakeAfterError')
     testInterface.serverData = createServerData();
@@ -595,33 +596,31 @@ function validateM1WithServSigKey(t, serverData, message, expectedEphKey, expect
     serverData.m1Hash = nacl.hash(m1)
 }
 
-function createM2(serverData) {
-    let m2 = new Uint8Array(38)
+function createM2(serverData) { 
+    let header = new Uint8Array([2, 0])
+    let time = new Int32Array([1, 0, 0, 0]) // Time is supported
 
-    m2[0] = 2
-
-    // Time is supported
-    m2[2] = 1
-
-    for(let i = 0; i < 32; i++) {
-        m2[6+i] = serverEphKeyPair.publicKey[i]
-    }
+    let m2 = new Uint8Array([
+        ...header, 
+        ...time,
+        ...serverEphKeyPair.publicKey])
 
     serverData.m2Hash = nacl.hash(m2)
-
     serverData.sEpoch = util.currentTimeMs()
 
     return m2;
 }
 
 function createBadM2(badData) {
-    let m2 = new Uint8Array(38)
+    let header = new Uint8Array([2, 0])
+    let time = new Int32Array([1, 0, 0, 0]) // Time is supported
+
+    let m2 = new Uint8Array([
+        ...header, 
+        ...time,
+        ...serverEphKeyPair.publicKey])
 
     m2.set(badData)
-
-    for(let i = 0; i < 32; i++) {
-        m2[6+i] = serverEphKeyPair.publicKey[i]
-    }
 
     return m2
 }
@@ -630,10 +629,14 @@ function createBadEphM2(serverData, m1) {
     let publicEphemeral = new Uint8Array(m1, 10, 32)
     serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
 
-    let m2 = new Uint8Array(38)
-    m2[0] = 2
-    m2[2] = 1
-    m2.set(serverEphKeyPair.publicKey, 6)
+    let header = new Uint8Array([2, 0])
+    let time = new Int32Array([1, 0, 0, 0]) // Time is supported
+    
+    let m2 = new Uint8Array([
+        ...header, 
+        ...time,
+        ...serverEphKeyPair.publicKey])
+
     m2[6] = 0
     serverData.m1Hash = nacl.hash(new Uint8Array(m1))
     serverData.m2Hash = nacl.hash(m2)
@@ -644,57 +647,31 @@ function createBadEphM2(serverData, m1) {
 }
 
 function createM3(serverData) {
-    let m3 = new Uint8Array(102)
 
-    m3[0] = 3
-
-    for (let i = 0; i < 32; i++) {
-        m3[6+i] = serverSigKeyPair.publicKey[i]
-    }
-
-    let concat = new Uint8Array([...sigBytes1, ...serverData.m1Hash, ...serverData.m2Hash])
-
-    let signature = nacl.sign.detached(concat, serverSigKeyPair.secretKey)
-
-    for (let i = 0; i < 64; i++) {
-        m3[38+i] = signature[i]
-    }
+    let header = new Uint8Array([3, 0])
 
     let time = new Int32Array([util.currentTimeMs() - serverData.sEpoch])
     time = new Uint8Array(time.buffer)
 
-    m3[2] = time[0]
-    m3[3] = time[1]
-    m3[4] = time[2]
-    m3[5] = time[3]
+    let concat = new Uint8Array([...sigBytes1, ...serverData.m1Hash, ...serverData.m2Hash])
+    let signature = nacl.sign.detached(concat, serverSigKeyPair.secretKey)
+
+    let m3 = new Uint8Array([
+        ...header, 
+        ...time,
+        ...serverSigKeyPair.publicKey,
+        ...signature])
 
     let encrypted = encrypt(serverData, m3)
     return encrypted
 }
 
-function createBadM3(m1, badData) {
-    let serverData = createServerData()
-    serverData.m1Hash = nacl.hash(new Uint8Array(m1))
-
-    serverData.sessionKey = new Uint8Array([
-        223, 248,  72,  68, 244,  41, 255,  27,
-         32, 180, 231, 197,   4, 130, 135,  46,
-        253,  65, 203, 210, 125, 183, 210, 233,
-         62, 156, 211,  97,  17, 254, 141, 237
-    ])
-
-    let m2 = new Uint8Array(38)
-    m2[0] = 2
-    m2[2] = 1
-    for(let i = 0; i < 32; i++) {
-        m2[6+i] = serverEphKeyPair.publicKey[i]
-    }
-
+function createBadM3(serverData, badData) {
     let m3 = new Uint8Array(102)
     m3.set(badData)
     let encrypted = encrypt(serverData, m3)
 
-    return [m2, encrypted]
+    return encrypted
 }
 
 function validateM4(t, serverData, message) {
@@ -709,29 +686,17 @@ function validateM4(t, serverData, message) {
 
     t.equal(m4[1], 0, 'M4: Bad packet header, expected 0, was ' + m4[1])
 
-    t.ok(!(m4[2] === 0 && m4[3] === 0 && m4[4] === 0 && m4[5] === 0), 'M4: Expected time to be set')
-
-    let time = new Uint8Array(4)
-    time[0] = m4[2]
-    time[1] = m4[3]
-    time[2] = m4[4]
-    time[3] = m4[5]
+    let time = m4.slice(2,6)
+    t.notArrayEqual(time, [0, 0, 0, 0], 'M4: Expected time to be set')
 
     time = (new Int32Array(time.buffer))[0]
-
     t.ok(!(util.currentTimeMs() - serverData.cEpoch > time + threshold ), 'M4: Delayed packet')
 
-    let clientSigKey = new Uint8Array(32)
-    for (let i = 0; i < 32; i++) {
-        clientSigKey[i] = m4[6+i]
-    }
+    let clientSigKey = m4.slice(6,38)
 
     t.arrayEqual(clientSigKey, clientSigKeyPair.publicKey, 'Client signing key does not match expected')
 
-    let signature = new Uint8Array(64)
-    for (let i = 0; i < 64; i++) {
-        signature[i] = m4[38+i]
-    }
+    let signature = m4.slice(38,102)
 
     let concat = new Uint8Array([...sigBytes2, ...serverData.m1Hash, ...serverData.m2Hash])
 
@@ -753,28 +718,21 @@ function decrypt(serverData, message) {
     } else if (message[0] === 6 && message[1] === 128) {
         lastFlag = true
     } else {
-        return '  EncryptedMessage: Bad packet header, was  ' +
+        return 'EncryptedMessage: Bad packet header, was  ' +
                 + message[0] + ' ' + message[1]
     }
 
-    let bytes = new Uint8Array(message.byteLength - 2)
-    let msg = new Uint8Array(message)
-
-    for (let i = 0; i < message.byteLength - 2; i++) {
-        bytes[i] = msg[i+2]
-    }
+    let bytes = message.slice(2)
 
     let clear = nacl.secretbox.open(bytes, serverData.dNonce, serverData.sessionKey)
     serverData.dNonce = increaseNonce2(serverData.dNonce)
 
     if (clear === false) {
-        return '  EncryptedMessage: Failed to decrypt'
+        return 'EncryptedMessage: Failed to decrypt'
     }
 
-    let copy = new Uint8Array(clear.length)
-    for (let i = 0; i < copy.length; i++) {
-        copy[i] = clear[i]
-    }
+    let copy = new Uint8Array(clear)
+
     return {
         data: copy,
         last: lastFlag
@@ -785,13 +743,9 @@ function encrypt(serverData, clearBytes, last = false) {
     let body = nacl.secretbox(clearBytes, serverData.eNonce, serverData.sessionKey)
     serverData.eNonce = increaseNonce2(serverData.eNonce)
 
-    let encryptedMessage = new Uint8Array(body.length + 2)
-    encryptedMessage[0] = 6
-    encryptedMessage[1] = last ? 128 : 0
-
-    for (let i = 0; i < body.length; i++) {
-        encryptedMessage[2+i] = body[i]
-    }
+    let headerByte1= 6
+    let headerByte2 = last ? 128 : 0
+    let encryptedMessage = new Uint8Array([headerByte1, headerByte2, ...body])
 
     return encryptedMessage
 }
@@ -916,7 +870,7 @@ function validateAppPacketWithLastFlag(t, serverData, message) {
     t.ok(last, 'Last message')
 }
 
-async function  standardHandshake(t){
+async function standardHandshake(t){
     let [mockSocketInterface, testInterface] = createMockSocket()
     testInterface.setState(mockSocketInterface.OPEN)
 
@@ -969,9 +923,16 @@ async function testBadM3(t, badData, sigKey, expectedError){
     sc.setOnClose(doNothing)
 
     let serverPromise = async function(){
+        let serverData = createServerData()
+
         let m1 = await testInterface.receive(1000)
-        const [m2, m3] = createBadM3( m1, badData)
+        serverData.m1Hash = nacl.hash(new Uint8Array(m1))
+        let publicEphemeral = new Uint8Array(m1, 10, 32)
+        serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
+
+        const m2 = createM2(serverData)
         testInterface.send(m2)
+        const m3 = createBadM3( serverData, badData)
         testInterface.send(m3)
     }()
 
