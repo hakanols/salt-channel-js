@@ -38,8 +38,6 @@ const bigPayload = util.hex2ab('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +
     '9999999999999999999999999999999999999999ffffffffffffffffffffffffffffffffffffffff')
 
 //////////////////////////////////////////////////////////////////////////////////////////////
-    
-let serverData;
 
 let cEpoch
 let sEpoch
@@ -89,21 +87,22 @@ function createMockSocket(){
         },
         setState: function(state){
             mockSocketInterface.readyState = state
-        }
+        },
+        serverData: undefined
     }
 
 	return [ mockSocketInterface, testInterface ]
 }
 
 async function testServerSide(t, testInterface, validateM1){        
-    serverData = createServerData();
+    testInterface.serverData = createServerData();
 
     let m1 = await testInterface.receive(1000)
-    validateM1(t, m1)
-    testInterface.send(createM2())
-    testInterface.send(createM3())
+    validateM1(t, testInterface.serverData, m1)
+    testInterface.send(createM2(testInterface.serverData))
+    testInterface.send(createM3(testInterface.serverData))
     let m4 = await testInterface.receive(1000)
-    validateM4(t, m4)
+    validateM4(t, testInterface.serverData, m4)
 }
 
 function createErrorWaiter(sc){
@@ -121,12 +120,13 @@ function createServerData(){
     let dNonce = new Uint8Array(nacl.secretbox.nonceLength)
     eNonce[0] = 2
     dNonce[0] = 1
-    let sessionKey;
 
     return {
         eNonce: eNonce,
         dNonce: dNonce,
-        sessionKey: sessionKey
+        sessionKey: undefined,
+        m1Hash: undefined,
+        m2Hash: undefined
     }
 }
 
@@ -147,7 +147,7 @@ test('withServSigKey', async function (t) {
     })
     sc.setOnClose(doNothing)
 
-    let serverPromise = testServerSide(t, testInterface, function(t,m1){validateM1WithServSigKey(t,m1,clientEphKeyPair.publicKey,serverSigKeyPair.publicKey)})
+    let serverPromise = testServerSide(t, testInterface, function(t,serverData,m1){validateM1WithServSigKey(t,serverData,m1,clientEphKeyPair.publicKey,serverSigKeyPair.publicKey)})
 
     await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey);
 
@@ -163,7 +163,7 @@ test('sendAppPacket1', async function (t) {
 
     sc.send(false, new Uint8Array([0]).buffer)
     let app1 = await testInterface.receive(1000)
-    validateAppPacket(t, app1)
+    validateAppPacket(t, testInterface.serverData, app1)
 
 	t.end();
 });
@@ -173,7 +173,7 @@ test('sendAppPacket2', async function (t) {
 
     sc.send(false, [new Uint8Array([0])])
     let app2 = await testInterface.receive(1000)
-    validateAppPacket(t, app2)
+    validateAppPacket(t, testInterface.serverData, app2)
 
 	t.end();
 });
@@ -182,7 +182,7 @@ test('receiveAppPacket', async function (t) {
     let [sc, testInterface] = await standardHandshake(t)
 
     let appPacket = getAppPacket()
-    let encrypted = encrypt(appPacket)
+    let encrypted = encrypt(testInterface.serverData, appPacket)
     testInterface.send(encrypted)
 
     let message = await sc.receive(1000)
@@ -197,7 +197,7 @@ test('sendMultiAppPacket1', async function (t) {
 
     sc.send(false, [new Uint8Array([0]).buffer, new Uint8Array([1])])
     let multiApp = await testInterface.receive(1000)
-    validateMultiAppPacket(t, multiApp)
+    validateMultiAppPacket(t, testInterface.serverData, multiApp)
 	t.end();
 });
 
@@ -206,7 +206,7 @@ test('sendMultiAppPacket2', async function (t) {
 
     sc.send(false, new Uint8Array([0]), new Uint8Array([1]).buffer)
     let multiApp = await testInterface.receive(1000)
-    validateMultiAppPacket(t, multiApp)
+    validateMultiAppPacket(t, testInterface.serverData, multiApp)
 	t.end();
 });
 
@@ -215,7 +215,7 @@ test('testSendBigMultiAppPacket', async function (t) {
 
     sc.send(false, new Uint8Array([0]), bigPayload)
     let multiApp = await testInterface.receive(1000)
-    validateBigMultiAppPacket(t, multiApp)
+    validateBigMultiAppPacket(t, testInterface.serverData, multiApp)
 	t.end();
 });
 
@@ -223,7 +223,7 @@ test('receiveMultiAppPacket', async function (t) {
     let [sc, testInterface] = await standardHandshake(t)
 
     let multiAppPacket = getMultiAppPacket()
-    let encrypted = encrypt(multiAppPacket)
+    let encrypted = encrypt(testInterface.serverData, multiAppPacket)
     testInterface.send(encrypted)
 
     let multiApp1 = await sc.receive(1000)
@@ -250,7 +250,7 @@ test('receiveBadEncryption', async function (t) {
 
     appPacket1.set(time, 2)
 
-    let encrypted1 = encrypt(appPacket1)
+    let encrypted1 = encrypt(testInterface.serverData, appPacket1)
 
     encrypted1[5] = 0
     encrypted1[6] = 0
@@ -264,7 +264,7 @@ test('receiveBadEncryption', async function (t) {
 
     console.log('receiveAfterError')
     let appPacket2 = getAppPacket()
-    let encrypted2 = encrypt(appPacket2)
+    let encrypted2 = encrypt(testInterface.serverData, appPacket2)
     testInterface.send(encrypted2)
 
     let receivedError2 = await errorWaiter(1000) 
@@ -299,7 +299,7 @@ test('receiveDelayed', async function (t) {
     appPacket[3] = 0
     appPacket[4] = 0
     appPacket[5] = 0
-    let encrypted = encrypt(appPacket)
+    let encrypted = encrypt(testInterface.serverData, appPacket)
     testInterface.send(encrypted)
 
     let receivedError1 = await errorWaiter(1000) 
@@ -307,7 +307,7 @@ test('receiveDelayed', async function (t) {
     t.equal(receivedError1, errorMsg1, "Expect error")
 
     console.log('handShakeAfterError')
-    serverData = createServerData();
+    testInterface.serverData = createServerData();
 
     const errorMsg2 = 'Handshake: Invalid internal state: closed'
     t.throws(async function(){
@@ -323,7 +323,7 @@ test('receiveLastFlag', async function (t) {
     let [sc, testInterface] = await standardHandshake(t);
 
     let appPacket = getAppPacket()
-    let encrypted = encrypt(appPacket, true)
+    let encrypted = encrypt(testInterface.serverData, appPacket, true)
     testInterface.send(encrypted)
 
     let message = await sc.receive(1000)
@@ -341,7 +341,7 @@ test('sendLastFlag', async function (t) {
     sc.send(true, new Uint8Array(1));
 
     let message = await testInterface.receive(1000)
-    validateAppPacketWithLastFlag(t, message)
+    validateAppPacketWithLastFlag(t, testInterface.serverData, message)
 
 	console.log('stateAfterSentLastFlag')
     t.equal(sc.getState(), 'closed', 'State not closed')
@@ -364,7 +364,7 @@ test('receiveBadHeaderEnc1', async function (t) {
     let errorWaiter = createErrorWaiter(sc);
     const expectedError = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 1 0' 
     const badData = new Uint8Array([1, 0])
-    testInterface.send(createBadHeaderEnc(badData))
+    testInterface.send(createBadHeaderEnc(testInterface.serverData, badData))
     let receivedError = await errorWaiter(1000)
     t.equal(receivedError, expectedError, "Expect error")
 	t.end();
@@ -375,7 +375,7 @@ test('receiveBadHeaderEnc2', async function (t) {
     let errorWaiter = createErrorWaiter(sc);
     const expectedError = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 6 2'
     const badData = new Uint8Array([6, 2])
-    testInterface.send(createBadHeaderEnc(badData))
+    testInterface.send(createBadHeaderEnc(testInterface.serverData, badData))
     let receivedError = await errorWaiter(1000)
     t.equal(receivedError, expectedError, "Expect error")
 	t.end();
@@ -386,7 +386,7 @@ test('receiveBadHeaderApp1', async function (t) {
     let errorWaiter = createErrorWaiter(sc);
     const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 0 0'
     const badData = new Uint8Array([0, 0])
-    testInterface.send(createBadHeaderApp(badData))
+    testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
     let receivedError = await errorWaiter(1000)
     t.equal(receivedError, expectedError, "Expect error")
 	t.end();
@@ -397,7 +397,7 @@ test('receiveBadHeaderApp2', async function (t) {
     let errorWaiter = createErrorWaiter(sc);
     const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 5 1'
     const badData = new Uint8Array([5, 1])
-    testInterface.send(createBadHeaderApp(badData))
+    testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
     let receivedError = await errorWaiter(1000)
     t.equal(receivedError, expectedError, "Expect error")
 	t.end();
@@ -408,7 +408,7 @@ test('receiveBadHeaderApp3', async function (t) {
     let errorWaiter = createErrorWaiter(sc);
     const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 11 1'
     const badData = new Uint8Array([11, 1])
-    testInterface.send(createBadHeaderApp(badData))
+    testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
     let receivedError = await errorWaiter(1000)
     t.equal(receivedError, expectedError, "Expect error")
 	t.end();
@@ -441,32 +441,28 @@ test('receiveBadTimeM2', async function (t) {
 test('receiveBadHeaderM31', async function (t) {
     const expectedError = 'M3: Bad packet header. Expected 3 0, was 0 0'
     const badData = new Uint8Array([0, 0])
-    const [m2, m3] = createBadM3(badData)
-    await testBadM3(t, m2, m3, undefined, expectedError)
+    await testBadM3(t, badData, undefined, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderM32', async function (t) {
     const expectedError = 'M3: Bad packet header. Expected 3 0, was 3 1'
     const badData = new Uint8Array([3, 1])
-    const [m2, m3] = createBadM3(badData)
-    await testBadM3(t, m2, m3, undefined, expectedError)
+    await testBadM3(t, badData, undefined, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderM33', async function (t) {
     const expectedError = 'M3: ServerSigKey does not match expected'
     const badData = new Uint8Array([3, 0, 20, 0, 0, 0, 12, 23, 34, 56])
-    const [m2, m3] = createBadM3(badData)
-    await testBadM3(t, m2, m3, serverSigKeyPair.publicKey, expectedError)
+    await testBadM3(t, badData, serverSigKeyPair.publicKey, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderM34', async function (t) {
     const expectedError = 'M3: Could not verify signature'
     const badData = new Uint8Array([3, 0, 20, 0, 0, 0, 12, 23, 34, 56])
-    const [m2, m3] = createBadM3(badData)
-    await testBadM3(t, m2, m3, undefined, expectedError)
+    await testBadM3(t, badData, undefined, expectedError)
 	t.end();
 });
 
@@ -481,11 +477,11 @@ test('receiveBadPubEph', async function (t) {
     sc.setOnClose(doNothing)
 
     let serverPromise = async function(){
-        serverData = createServerData();
+        testInterface.serverData = createServerData();
         let m1 = await testInterface.receive(1000)
         // Skip validating of m1
-        testInterface.send(createBadEphM2(m1))
-        testInterface.send(createM3())
+        testInterface.send(createBadEphM2(testInterface.serverData, m1))
+        testInterface.send(createM3(testInterface.serverData))
     }()
 
     t.throws(async function(){
@@ -532,17 +528,17 @@ function getMultiAppPacket() {
     return multiAppPacket
 }
 
-function createBadHeaderEnc(badData) {
+function createBadHeaderEnc(serverData, badData) {
     let appPacket = getAppPacket()
-    let encrypted = encrypt(appPacket)
+    let encrypted = encrypt(serverData, appPacket)
     encrypted.set(badData)
     return encrypted
 }
 
-function createBadHeaderApp(badData) {
+function createBadHeaderApp(serverData, badData) {
     let appPacket = getAppPacket()
     appPacket.set(badData)
-    let encrypted = encrypt(appPacket)
+    let encrypted = encrypt(serverData, appPacket)
     return encrypted
 }
 
@@ -552,7 +548,7 @@ function createBadHeaderApp(badData) {
 // =================== SERVER SIDE HANDSHAKE CODE ===================
 // ============================ (sorta) =============================
 
-function validateM1NoServSigKey(t, message) {
+function validateM1NoServSigKey(t, serverData, message) {
     t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
     let m1 = new Uint8Array(message)
 
@@ -574,7 +570,7 @@ function validateM1NoServSigKey(t, message) {
     serverData.m1Hash = nacl.hash(m1)
 }
 
-function validateM1WithServSigKey(t, message, expectedEphKey, expectedServKey) {
+function validateM1WithServSigKey(t, serverData, message, expectedEphKey, expectedServKey) {
     t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
     let m1 = new Uint8Array(message)
 
@@ -599,7 +595,7 @@ function validateM1WithServSigKey(t, message, expectedEphKey, expectedServKey) {
     serverData.m1Hash = nacl.hash(m1)
 }
 
-function createM2() {
+function createM2(serverData) {
     let m2 = new Uint8Array(38)
 
     m2[0] = 2
@@ -627,14 +623,12 @@ function createBadM2(badData) {
         m2[6+i] = serverEphKeyPair.publicKey[i]
     }
 
-    serverData.m2Hash = nacl.hash(m2)
-
     sEpoch = util.currentTimeMs()
 
     return m2
 }
 
-function createBadEphM2(m1) {
+function createBadEphM2(serverData, m1) {
     let publicEphemeral = new Uint8Array(m1, 10, 32)
     serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
 
@@ -651,7 +645,7 @@ function createBadEphM2(m1) {
     return m2
 }
 
-function createM3() {
+function createM3(serverData) {
     let m3 = new Uint8Array(102)
 
     m3[0] = 3
@@ -676,12 +670,14 @@ function createM3() {
     m3[4] = time[2]
     m3[5] = time[3]
 
-    let encrypted = encrypt(m3)
+    let encrypted = encrypt(serverData, m3)
     return encrypted
 }
 
-function createBadM3(badData) {
-    serverData = createServerData();
+function createBadM3(m1, badData) {
+    let serverData = createServerData()
+    serverData.m1Hash = nacl.hash(new Uint8Array(m1))
+
     serverData.sessionKey = new Uint8Array([
         223, 248,  72,  68, 244,  41, 255,  27,
          32, 180, 231, 197,   4, 130, 135,  46,
@@ -698,16 +694,16 @@ function createBadM3(badData) {
 
     let m3 = new Uint8Array(102)
     m3.set(badData)
-    let encrypted = encrypt(m3)
+    let encrypted = encrypt(serverData, m3)
 
     return [m2, encrypted]
 }
 
-function validateM4(t, message) {
+function validateM4(t, serverData, message) {
     t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
 
     let encryptedMessage = new Uint8Array(message)
-    let m4 = decrypt(encryptedMessage).data
+    let m4 = decrypt(serverData, encryptedMessage).data
 
     t.ok(!util.isString(m4), m4)
 
@@ -752,7 +748,7 @@ function validateM4(t, message) {
 // ========================== CRYPTO STUFF ==========================
 // ==================================================================
 
-function decrypt(message) {
+function decrypt(serverData, message) {
     let lastFlag
     if (message[0] === 6 && message[1] === 0) {
         lastFlag = false
@@ -787,7 +783,7 @@ function decrypt(message) {
     }
 }
 
-function encrypt(clearBytes, last = false) {
+function encrypt(serverData, clearBytes, last = false) {
     let body = nacl.secretbox(clearBytes, serverData.eNonce, serverData.sessionKey)
     serverData.eNonce = increaseNonce2(serverData.eNonce)
 
@@ -833,11 +829,11 @@ function increaseNonce2(nonce) {
 // ==================================================================
 // ==================================================================
 
-function validateAppPacket(t, message) {
+function validateAppPacket(t, serverData, message) {
     t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
 
     let encryptedMessage = new Uint8Array(message)
-    let appPacket = decrypt(encryptedMessage).data
+    let appPacket = decrypt(serverData, encryptedMessage).data
 
     t.equal(appPacket.length, 7, 'Expected message length');
 
@@ -852,10 +848,10 @@ function validateAppPacket(t, message) {
     t.equal(appPacket[6], 0, 'Unexpected data')
 }
 
-function validateMultiAppPacket(t, message) {
+function validateMultiAppPacket(t, serverData, message) {
      t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
     let encryptedMessage = new Uint8Array(message)
-    let multiAppPacket = decrypt(encryptedMessage).data
+    let multiAppPacket = decrypt(serverData, encryptedMessage).data
 
     t.equal(multiAppPacket.length, 14, 'Expected message length')
     t.equal(multiAppPacket[0], 11, 'Expected MultiAppPacket type, was ' + multiAppPacket[0])
@@ -877,10 +873,10 @@ function validateMultiAppPacket(t, message) {
     t.equal(multiAppPacket[13], 1, 'Unexpected data, expected 1, was ' + multiAppPacket[13])
 }
 
-function validateBigMultiAppPacket(t, message) {
+function validateBigMultiAppPacket(t, serverData, message) {
     t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
     let encryptedMessage = new Uint8Array(message)
-    let multiAppPacket = decrypt(encryptedMessage).data
+    let multiAppPacket = decrypt(serverData, encryptedMessage).data
 
     t.equal(multiAppPacket.length, bigPayload.length + 13, 'Expected message length')
 
@@ -903,11 +899,11 @@ function validateBigMultiAppPacket(t, message) {
     t.arrayEqual( payload, bigPayload, 'Unexpected data, expected ' + util.ab2hex(bigPayload.buffer) + ', was ' + util.ab2hex(payload.buffer))
 }
 
-function validateAppPacketWithLastFlag(t, message) {
+function validateAppPacketWithLastFlag(t, serverData, message) {
     t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
     let encryptedMessage = new Uint8Array(message)
 
-    let {data, last} = decrypt(encryptedMessage)
+    let {data, last} = decrypt(serverData, encryptedMessage)
 
     t.equal(data.length, 7, 'Expected message length')
     t.equal(data[0], 5, 'Expected MultiAppPacket type')
@@ -952,7 +948,6 @@ async function testBadM2(t, m2, sigKey, expectedError){
     sc.setOnClose(doNothing)
 
     let serverPromise = async function(){
-        serverData = createServerData();
         await testInterface.receive(1000)
         // Skip validating of m1
         testInterface.send(m2)
@@ -967,7 +962,7 @@ async function testBadM2(t, m2, sigKey, expectedError){
     await serverPromise
 }
 
-async function testBadM3(t, m2, m3, sigKey, expectedError){
+async function testBadM3(t, badData, sigKey, expectedError){
     let [mockSocketInterface, testInterface] = createMockSocket()
     testInterface.setState(mockSocketInterface.OPEN)
 
@@ -976,9 +971,8 @@ async function testBadM3(t, m2, m3, sigKey, expectedError){
     sc.setOnClose(doNothing)
 
     let serverPromise = async function(){
-        serverData = createServerData();
-        await testInterface.receive(1000)
-        // Skip validating of m1
+        let m1 = await testInterface.receive(1000)
+        const [m2, m3] = createBadM3( m1, badData)
         testInterface.send(m2)
         testInterface.send(m3)
     }()
