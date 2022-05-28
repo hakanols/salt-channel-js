@@ -37,6 +37,16 @@ const bigPayload = util.hex2ab('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +
     '77777777777777777777777777777777777777778888888888888888888888888888888888888888' +
     '9999999999999999999999999999999999999999ffffffffffffffffffffffffffffffffffffffff')
 
+    const PacketTypeM1  = 1       
+    const PacketTypeM2  = 2      
+    const PacketTypeM3  = 3       
+    const PacketTypeM4  = 4       
+    const PacketTypeApp = 5       
+    const PacketTypeEncrypted = 6       
+    const PacketTypeA1  = 8       
+    const PacketTypeA2  = 9       
+    const PacketTypeMultiApp = 11     
+
 //////////////////////////////////////////////////////////////////////////////////////////////
 
 let threshold
@@ -92,11 +102,11 @@ function createMockSocket(){
 	return [ mockSocketInterface, testInterface ]
 }
 
-async function testServerSide(t, testInterface, validateM1){        
+async function testServerSide(t, testInterface, clientEphPub, serverSigPub){        
     testInterface.serverData = createServerData();
 
     let m1 = await testInterface.receive(1000)
-    validateM1(t, testInterface.serverData, m1)
+    validateM1(t, testInterface.serverData, m1, clientEphPub, serverSigPub)
     testInterface.send(createM2(testInterface.serverData))
     testInterface.send(createM3(testInterface.serverData))
     let m4 = await testInterface.receive(1000)
@@ -147,7 +157,7 @@ test('withServSigKey', async function (t) {
     })
     sc.setOnClose(doNothing)
 
-    let serverPromise = testServerSide(t, testInterface, function(t,serverData,m1){validateM1WithServSigKey(t,serverData,m1,clientEphKeyPair.publicKey,serverSigKeyPair.publicKey)})
+    let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey, serverSigKeyPair.publicKey)
 
     await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey);
 
@@ -181,7 +191,7 @@ test('sendAppPacket2', async function (t) {
 test('receiveAppPacket', async function (t) {
     let [sc, testInterface] = await standardHandshake(t)
 
-    let appPacket = getAppPacket(testInterface.serverData)
+    let appPacket = createAppPacket(testInterface.serverData, [0])
     let encrypted = encrypt(testInterface.serverData, appPacket)
     testInterface.send(encrypted)
 
@@ -222,7 +232,7 @@ test('testSendBigMultiAppPacket', async function (t) {
 test('receiveMultiAppPacket', async function (t) {
     let [sc, testInterface] = await standardHandshake(t)
 
-    let multiAppPacket = getMultiAppPacket(testInterface.serverData)
+    let multiAppPacket = createMultiAppPacket(testInterface.serverData, [[0], [1]])
     let encrypted = encrypt(testInterface.serverData, multiAppPacket)
     testInterface.send(encrypted)
 
@@ -263,7 +273,7 @@ test('receiveBadEncryption', async function (t) {
     t.equal(receivedError1, errorMsg1, "Expect error")
 
     console.log('## receiveAfterError')
-    let appPacket2 = getAppPacket(testInterface.serverData)
+    let appPacket2 = createAppPacket(testInterface.serverData, [0])
     let encrypted2 = encrypt(testInterface.serverData, appPacket2)
     testInterface.send(encrypted2)
 
@@ -284,7 +294,7 @@ test('receiveDelayed', async function (t) {
 
     sc.setOnClose(doNothing)
 
-    let serverPromise = testServerSide(t, testInterface, validateM1NoServSigKey)
+    let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey)
 
     await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
 
@@ -294,7 +304,7 @@ test('receiveDelayed', async function (t) {
 
     threshold = 20
 
-    let appPacket = getAppPacket(testInterface.serverData)
+    let appPacket = createAppPacket(testInterface.serverData, [0])
     appPacket[2] = 2    // Time
     appPacket[3] = 0
     appPacket[4] = 0
@@ -323,7 +333,7 @@ test('receiveDelayed', async function (t) {
 test('receiveLastFlag', async function (t) {
     let [sc, testInterface] = await standardHandshake(t);
 
-    let appPacket = getAppPacket(testInterface.serverData)
+    let appPacket = createAppPacket(testInterface.serverData, [0])
     let encrypted = encrypt(testInterface.serverData, appPacket, true)
     testInterface.send(encrypted)
 
@@ -495,105 +505,19 @@ test('receiveBadPubEph', async function (t) {
 	t.end();
 });
 
-function doNothing() {
-    // Do nothing
-}
-
-function getAppPacket(serverData) {
-    let appPacket = new Uint8Array(7)
-    appPacket[0] = 5
-
-    let time = new Int32Array([util.currentTimeMs() - serverData.sEpoch])
-    time = new Uint8Array(time.buffer)
-
-    appPacket.set(time, 2)
-
-    return appPacket
-}
-
-function getMultiAppPacket(serverData) {
-    let multiAppPacket = new Uint8Array(14)
-    multiAppPacket[0] = 11  // Type
-
-    multiAppPacket[6] = 2   // Count
-
-    multiAppPacket[8] = 1   // Length
-
-    multiAppPacket[11] = 1  // Length
-    multiAppPacket[13] = 1  // Data
-
-    let time = new Int32Array([util.currentTimeMs() - serverData.sEpoch])
-    time = new Uint8Array(time.buffer)
-    multiAppPacket.set(time, 2)
-
-    return multiAppPacket
-}
-
-function createBadHeaderEnc(serverData, badData) {
-    let appPacket = getAppPacket(serverData)
-    let encrypted = encrypt(serverData, appPacket)
-    encrypted.set(badData)
-    return encrypted
-}
-
-function createBadHeaderApp(serverData, badData) {
-    let appPacket = getAppPacket(serverData)
-    appPacket.set(badData)
-    let encrypted = encrypt(serverData, appPacket)
-    return encrypted
-}
-
 // ==================================================================
 // ==================================================================
 // ==================================================================
 // =================== SERVER SIDE HANDSHAKE CODE ===================
 // ============================ (sorta) =============================
 
-function validateM1NoServSigKey(t, serverData, message) {
-    t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
-    let m1 = new Uint8Array(message)
-
-    t.equal( m1.length, 42, 'Bad packet length')
-
-    let protocol = String.fromCharCode(...m1.slice(0,4))
-    t.equal(protocol, 'SCv2', 'Bad protocol indicator')
-    t.equal(m1[4], 1, 'Invalid packet type')
-    t.equal(m1[5], 0, 'Unexpected server sig key included')
-    t.arrayEqual(m1.slice(6, 10), [1, 0, 0, 0], 'M1: Expected time to be set: ' +util.ab2hex(m1.buffer))
-
-    serverData.cEpoch = util.currentTimeMs()
-
-    let publicEphemeral = m1.slice(10)
-    t.arrayEqual(publicEphemeral, clientEphKeyPair.publicKey, 'Unexpected public ephemeral key from client')
-
-    serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
-
-    serverData.m1Hash = nacl.hash(m1)
+function doNothing() {
+    // Do nothing
 }
 
-function validateM1WithServSigKey(t, serverData, message, expectedEphKey, expectedServKey) {
-    t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
-    let m1 = new Uint8Array(message)
-
-    t.equal( m1.length, 74, 'Bad packet length')
-
-    let protocol = String.fromCharCode(...m1.slice(0, 4))
-    t.equal(protocol, 'SCv2', 'Bad protocol indicator')
-    t.equal(m1[4], 1, 'Invalid packet type')
-    t.equal(m1[5], 1, 'Expected server sig key included')
-    t.arrayEqual(m1.slice(6, 10), [1, 0, 0, 0], 'M1: Expected time to be set: ' +util.ab2hex(m1.buffer))
-
-    serverData.cEpoch = util.currentTimeMs()
-
-    let publicEphemeral = m1.slice(10, 42)
-    t.arrayEqual( publicEphemeral, expectedEphKey, 'Unexpected public ephemeral key from client')
-
-    let serverSigKey = m1.slice(42, 74)
-    t.arrayEqual( serverSigKey, expectedServKey, 'Expected server sig key from client')
-
-    serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
-
-    serverData.m1Hash = nacl.hash(m1)
+function numberTo8Array(number){
+    let array = new Int16Array([number])
+    return new Uint8Array(array.buffer)
 }
 
 function createM2(serverData) { 
@@ -666,43 +590,63 @@ function createM3(serverData) {
     return encrypted
 }
 
+function createAppPacket(serverData, message) {
+    let header = new Uint8Array([PacketTypeApp, 0])
+    let time = new Int32Array([util.currentTimeMs() - serverData.sEpoch])
+    time = new Uint8Array(time.buffer)
+
+    let packet= new Uint8Array([
+        ...header, 
+        ...time,
+        ...message])
+
+    return packet
+}
+
+function createMultiAppPacket(serverData, messages) {
+
+    let header = new Uint8Array([PacketTypeMultiApp, 0])
+    let time = new Int32Array([util.currentTimeMs() - serverData.sEpoch])
+    time = new Uint8Array(time.buffer)
+    let count = numberTo8Array(messages.length)
+
+    let packet= new Uint8Array([
+        ...header, 
+        ...time,
+        ...count])
+
+    messages.forEach(message => {
+        let size = numberTo8Array(message.length)
+        packet= new Uint8Array([
+            ...packet, 
+            ...size,
+            ...message])
+    });
+
+    return packet
+}
+
+function createBadHeaderEnc(serverData, badData) {
+    let appPacket = createAppPacket(serverData, [0])
+    let encrypted = encrypt(serverData, appPacket)
+    encrypted.set(badData)
+    return encrypted
+}
+
+function createBadHeaderApp(serverData, badData) {
+    let appPacket = createAppPacket(serverData, [0])
+    appPacket.set(badData)
+    let encrypted = encrypt(serverData, appPacket)
+    return encrypted
+}
+
+
 function createBadM3(serverData, badData) {
     let m3 = new Uint8Array(102)
     m3.set(badData)
     let encrypted = encrypt(serverData, m3)
 
     return encrypted
-}
-
-function validateM4(t, serverData, message) {
-    t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
-
-    let encryptedMessage = new Uint8Array(message)
-    let m4 = decrypt(serverData, encryptedMessage).data
-
-    t.ok(!util.isString(m4), m4)
-
-    t.equal(m4[0], 4, 'M4: Bad packet type, expected 4, was ' + m4[0])
-
-    t.equal(m4[1], 0, 'M4: Bad packet header, expected 0, was ' + m4[1])
-
-    let time = m4.slice(2,6)
-    t.notArrayEqual(time, [0, 0, 0, 0], 'M4: Expected time to be set')
-
-    time = (new Int32Array(time.buffer))[0]
-    t.ok(!(util.currentTimeMs() - serverData.cEpoch > time + threshold ), 'M4: Delayed packet')
-
-    let clientSigKey = m4.slice(6,38)
-
-    t.arrayEqual(clientSigKey, clientSigKeyPair.publicKey, 'Client signing key does not match expected')
-
-    let signature = m4.slice(38,102)
-
-    let concat = new Uint8Array([...sigBytes2, ...serverData.m1Hash, ...serverData.m2Hash])
-
-    let success = nacl.sign.detached.verify(concat, signature, clientSigKey)
-
-    t.ok(success, 'Could not verify signature')
 }
 
 // ==================================================================
@@ -780,6 +724,67 @@ function increaseNonce2(nonce) {
 // ==================================================================
 // ==================================================================
 // ==================================================================
+
+
+function validateM1(t, serverData, message, expectedEphKey, expectedServKey) {
+    t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
+    let m1 = new Uint8Array(message)
+
+    let expectedLength = 42 + ((expectedServKey === undefined) ? 0 : 32)
+    t.equal( m1.length, expectedLength, 'Check packet length')
+
+    let protocol = String.fromCharCode(...m1.slice(0, 4))
+    t.equal(protocol, 'SCv2', 'Check: Bad protocol indicator')
+
+    let expectedHeader = [PacketTypeM1, (expectedServKey === undefined) ? 0 : 1]
+    t.arrayEqual(m1.slice(4, 6), expectedHeader, 'M1: Expected header')
+    t.arrayEqual(m1.slice(6, 10), [1, 0, 0, 0], 'M1: Expected time to be set: ' +util.ab2hex(m1.buffer))
+
+    serverData.cEpoch = util.currentTimeMs()
+
+    let publicEphemeral = m1.slice(10, 42)
+    t.arrayEqual( publicEphemeral, expectedEphKey, 'Unexpected public ephemeral key from client')
+
+    if (expectedServKey !== undefined){
+        let serverSigKey = m1.slice(42, 74)
+        t.arrayEqual( serverSigKey, expectedServKey, 'Expected server sig key from client')
+    }
+
+    serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
+
+    serverData.m1Hash = nacl.hash(m1)
+}
+
+function validateM4(t, serverData, message) {
+    t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
+
+    let encryptedMessage = new Uint8Array(message)
+    let m4 = decrypt(serverData, encryptedMessage).data
+
+    t.ok(!util.isString(m4), m4)
+
+    t.equal(m4[0], 4, 'M4: Bad packet type, expected 4, was ' + m4[0])
+
+    t.equal(m4[1], 0, 'M4: Bad packet header, expected 0, was ' + m4[1])
+
+    let time = m4.slice(2,6)
+    t.notArrayEqual(time, [0, 0, 0, 0], 'M4: Expected time to be set')
+
+    time = (new Int32Array(time.buffer))[0]
+    t.ok(!(util.currentTimeMs() - serverData.cEpoch > time + threshold ), 'M4: Delayed packet')
+
+    let clientSigKey = m4.slice(6,38)
+
+    t.arrayEqual(clientSigKey, clientSigKeyPair.publicKey, 'Client signing key does not match expected')
+
+    let signature = m4.slice(38,102)
+
+    let concat = new Uint8Array([...sigBytes2, ...serverData.m1Hash, ...serverData.m2Hash])
+
+    let success = nacl.sign.detached.verify(concat, signature, clientSigKey)
+
+    t.ok(success, 'Could not verify signature')
+}
 
 function validateAppPacket(t, serverData, message) {
     t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
@@ -870,6 +875,10 @@ function validateAppPacketWithLastFlag(t, serverData, message) {
     t.ok(last, 'Last message')
 }
 
+// ==================================================================
+// ==================================================================
+// ==================================================================
+
 async function standardHandshake(t){
     let [mockSocketInterface, testInterface] = createMockSocket()
     testInterface.setState(mockSocketInterface.OPEN)
@@ -880,7 +889,7 @@ async function standardHandshake(t){
     })
     sc.setOnClose(doNothing)
 
-    let serverPromise = testServerSide(t, testInterface, validateM1NoServSigKey)
+    let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey)
 
     await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
 
