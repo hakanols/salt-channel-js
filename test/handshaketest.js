@@ -49,10 +49,6 @@ const bigPayload = util.hex2ab('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
-let threshold
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-
 function createMockSocket(){
 
     let readQueue = util.waitQueue();
@@ -102,7 +98,7 @@ function createMockSocket(){
 	return [ mockSocketInterface, testInterface ]
 }
 
-async function testServerSide(t, testInterface, clientEphPub, serverSigPub){        
+async function testServerSide(t, testInterface, clientEphPub, serverSigPub, threshold){        
     testInterface.serverData = createServerData();
 
     let m1 = await testInterface.receive(1000)
@@ -110,7 +106,7 @@ async function testServerSide(t, testInterface, clientEphPub, serverSigPub){
     testInterface.send(createM2(testInterface.serverData))
     testInterface.send(createM3(testInterface.serverData))
     let m4 = await testInterface.receive(1000)
-    validateM4(t, testInterface.serverData, m4)
+    validateM4(t, testInterface.serverData, m4, threshold)
 }
 
 function createErrorWaiter(sc){
@@ -198,7 +194,7 @@ test('receiveAppPacket', async function (t) {
 
     let message = await sc.receive(1000)
     t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
-    t.arrayEqual(new Uint8Array(message), new Uint8Array(1), 'Expected 1 zero byte, was ' + util.ab2hex(message));
+    t.arrayEqual(new Uint8Array(message), new Uint8Array(1), 'Unexpected data')
 
 	t.end();
 });
@@ -298,15 +294,14 @@ test('receiveDelayed', async function (t) {
 
     sc.setOnClose(doNothing)
 
-    let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey)
+    const threshold = 20
+    let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey, undefined, threshold)
 
     await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
 
     t.equal(sc.getState(), 'ready', 'State is OPEN')
 
     await serverPromise;
-
-    threshold = 20
 
     let appPacket = createAppPacket(testInterface.serverData, [0])
     appPacket[2] = 2    // Time
@@ -319,7 +314,6 @@ test('receiveDelayed', async function (t) {
     let receivedError1 = await errorWaiter(1000) 
     const errorMsg1 = '(Multi)AppPacket: Detected a delayed packet'
     t.equal(receivedError1, errorMsg1, "Expect error")   
-    threshold = undefined
 
     console.log('## handShakeAfterError')
     testInterface.serverData = createServerData();
@@ -669,8 +663,8 @@ function decrypt(serverData, message) {
     } else if (message[0] === PacketTypeEncrypted && message[1] === 128) {
         lastFlag = true
     } else {
-        return 'EncryptedMessage: Bad packet header, was  ' +
-                + message[0] + ' ' + message[1]
+        throw new Error('EncryptedMessage: Bad packet header, was  ' +
+                + message[0] + ' ' + message[1])
     }
 
     let bytes = message.slice(2)
@@ -679,7 +673,7 @@ function decrypt(serverData, message) {
     serverData.dNonce = increaseNonce2(serverData.dNonce)
 
     if (clear === false) {
-        return 'EncryptedMessage: Failed to decrypt'
+        throw new Error('EncryptedMessage: Failed to decrypt')
     }
 
     let copy = new Uint8Array(clear)
@@ -738,23 +732,23 @@ function validateM1(t, serverData, message, expectedEphKey, expectedServKey) {
     let m1 = new Uint8Array(message)
 
     let expectedLength = 42 + ((expectedServKey === undefined) ? 0 : 32)
-    t.equal( m1.length, expectedLength, 'Check packet length')
+    t.equal( m1.length, expectedLength, 'M1: Check packet length')
 
     let protocol = String.fromCharCode(...m1.slice(0, 4))
-    t.equal(protocol, 'SCv2', 'Check: Bad protocol indicator')
+    t.equal(protocol, 'SCv2', 'M1: Check: Bad protocol indicator')
 
     let expectedHeader = [PacketTypeM1, (expectedServKey === undefined) ? 0 : 1]
-    t.arrayEqual(m1.slice(4, 6), expectedHeader, 'M1: Expected header')
-    t.arrayEqual(m1.slice(6, 10), [1, 0, 0, 0], 'M1: Expected time to be set: ' +util.ab2hex(m1.buffer))
+    t.arrayEqual(m1.slice(4, 6), expectedHeader, 'M1: Check header')
+    t.arrayEqual(m1.slice(6, 10), [1, 0, 0, 0], 'M1: Check time to be set: ' +util.ab2hex(m1.slice(6, 10)))
 
     serverData.cEpoch = util.currentTimeMs()
 
     let publicEphemeral = m1.slice(10, 42)
-    t.arrayEqual( publicEphemeral, expectedEphKey, 'Unexpected public ephemeral key from client')
+    t.arrayEqual( publicEphemeral, expectedEphKey, 'M1: Check public ephemeral key from client')
 
     if (expectedServKey !== undefined){
         let serverSigKey = m1.slice(42, 74)
-        t.arrayEqual( serverSigKey, expectedServKey, 'Expected server sig key from client')
+        t.arrayEqual( serverSigKey, expectedServKey, 'M1: Check server sig key from client')
     }
 
     serverData.sessionKey = nacl.box.before(publicEphemeral, serverEphKeyPair.secretKey)
@@ -762,24 +756,24 @@ function validateM1(t, serverData, message, expectedEphKey, expectedServKey) {
     serverData.m1Hash = nacl.hash(m1)
 }
 
-function validateM4(t, serverData, message) {
+function validateM4(t, serverData, message, threshold) {
     t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
 
     let encryptedMessage = new Uint8Array(message)
     let m4 = decrypt(serverData, encryptedMessage).data
 
-    t.ok(!util.isString(m4), m4)
-
-    t.arrayEqual(m4.slice(0, 2), [PacketTypeM4, 0], 'M4: Expected header')
+    t.arrayEqual(m4.slice(0, 2), [PacketTypeM4, 0], 'M4: Check header')
 
     let time = m4.slice(2,6)
-    t.notArrayEqual(time, [0, 0, 0, 0], 'M4: Expected time to be set')
+    t.notArrayEqual(time, [0, 0, 0, 0], 'M4: Check time to be set: ' +util.ab2hex(time))
     time = (new Int32Array(time.buffer))[0]
-    t.ok(!(util.currentTimeMs() - serverData.cEpoch > time + threshold ), 'M4: Delayed packet')
+    if (threshold !== undefined) {
+        t.ok((util.currentTimeMs() - serverData.cEpoch < time + threshold ), 'M4: Delayed packet')
+    }
 
     let clientSigKey = m4.slice(6,38)
 
-    t.arrayEqual(clientSigKey, clientSigKeyPair.publicKey, 'Client signing key does not match expected')
+    t.arrayEqual(clientSigKey, clientSigKeyPair.publicKey, 'M4: Client signing key does not match expected')
 
     let signature = m4.slice(38,102)
 
@@ -787,7 +781,7 @@ function validateM4(t, serverData, message) {
 
     let success = nacl.sign.detached.verify(concat, signature, clientSigKey)
 
-    t.ok(success, 'Could not verify signature')
+    t.ok(success, 'M4: Could not verify signature')
 }
 
 function validateAppPacket(t, serverData, message, expectedData, lastFlag) {
@@ -796,17 +790,13 @@ function validateAppPacket(t, serverData, message, expectedData, lastFlag) {
     let encryptedMessage = new Uint8Array(message)
     let {data, last} = decrypt(serverData, encryptedMessage)
 
-    t.equal(last, lastFlag, 'Check last flag')
-    t.equal(data.length, 6 + expectedData.length, 'Expected message length');
+    t.equal(last, lastFlag, 'AppPacket: Check last flag')
+    t.equal(data.length, 6 + expectedData.length, 'AppPacket: Check message length');
 
     t.arrayEqual(data.slice(0, 2), [PacketTypeApp, 0], 'AppPacket: Expected header')
+    t.notArrayEqual(data.slice(2,6), [0, 0, 0, 0], 'AppPacket: Check time to be set: ' +util.ab2hex(data.slice(2,6)))
 
-    let time = data.slice(2,6)
-    t.notArrayEqual(time, [0, 0, 0, 0], 'AppPacket: Expected time to be set')
-    time = (new Int32Array(time.buffer))[0]
-    t.ok(!(util.currentTimeMs() - serverData.cEpoch > time + threshold), 'AppPacket delayed')
-
-    t.arrayEqual(data.slice(6), expectedData, 'Unexpected data')
+    t.arrayEqual(data.slice(6), expectedData, 'AppPacket: Unexpected data')
 }
 
 function validateMultiAppPacket(t, serverData, message, expectedData, lastFlag) {
@@ -816,17 +806,13 @@ function validateMultiAppPacket(t, serverData, message, expectedData, lastFlag) 
     let {data, last} = decrypt(serverData, encryptedMessage)
     let expectedBytes = createMultiAppPacketBody(expectedData)
 
-    t.equal(last, lastFlag, 'Check last flag')
-    t.equal(data.length, 6 + expectedBytes.length, 'Expected message length')
+    t.equal(last, lastFlag, 'AppPacket: Check last flag')
+    t.equal(data.length, 6 + expectedBytes.length, 'AppPacket: Check message length')
 
-    t.arrayEqual(data.slice(0, 2), [PacketTypeMultiApp, 0], 'AppPacket: Expected header')
+    t.arrayEqual(data.slice(0, 2), [PacketTypeMultiApp, 0], 'AppPacket: Check header')
+    t.notArrayEqual(data.slice(2,6), [0, 0, 0, 0], 'AppPacket: Check time to be set: ' +util.ab2hex(data.slice(2,6)))
 
-    let time = data.slice(2,6)
-    t.notArrayEqual(time, [0, 0, 0, 0], 'AppPacket: Expected time to be set')
-    time = (new Int32Array(time.buffer))[0]
-    t.ok(!(util.currentTimeMs() - serverData.cEpoch > time + threshold), 'AppPacket delayed')
-
-    t.arrayEqual(data.slice(6), expectedBytes, 'Unexpected data')
+    t.arrayEqual(data.slice(6), expectedBytes, 'AppPacket: Unexpected data')
 }
 
 // ==================================================================
