@@ -73,7 +73,6 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	// Set by calling corresponding set-function
 	let onerror
-	let onA2Response
 	let onclose
 
 	init()
@@ -118,34 +117,38 @@ export default function(ws, timeKeeper, timeChecker) {
 	}
 
 	// =========== A1A2 MESSAGE EXCHANGE ================
-	function a1a2(adressType, adress) {
-		if (saltState === STATE_INIT) {
-			saltState = STATE_A1A2
-        	sendA1(adressType, adress)
-        } else {
-        	errorAndThrow('A1A2: Invalid internal state: ' + saltState)
+	async function a1a2(adressType, adress) {
+		if (saltState !== STATE_INIT) {
+			throw new Error('A1A2: Invalid internal state: ' + saltState)
         }
+		saltState = STATE_A1A2
+
+		let a1a2ReadQueue = util.waitQueue();
+		ws.onmessage = function(event){
+			a1a2ReadQueue.push(new Uint8Array(event.data));
+		}
+		async function a1a2Receive(waitTime){
+			return (await a1a2ReadQueue.pull(waitTime))[0];
+		}
+
+		let a1 = createA1(adressType, adress)
+        ws.send(a1)
+		let a2 = await a1a2Receive(1000)
+		let prots = handleA2(a2)
+		return prots
     }
 
-    function sendA1(adressType = ADDR_TYPE_ANY, adress) {
-    	let a1
+    function createA1(adressType = ADDR_TYPE_ANY, adress) {
     	switch (adressType) {
     		case ADDR_TYPE_ANY:
-    			a1 = getA1Any()
-    			break
+    			return getA1Any()
+
     		case ADDR_TYPE_PUB:
-    			a1 = getA1Pub(adress)
-    			break
+    			return getA1Pub(adress)
+
     		default:
     			throw new RangeError('A1A2: Unsupported adress type: ' + adressType)
     	}
-
-        ws.onmessage = function(evt) {
-            handleA2(evt.data)
-        }
-
-        sendOnWs(a1.buffer)
-
     }
 
     function getA1Any() {
@@ -170,17 +173,17 @@ export default function(ws, timeKeeper, timeChecker) {
 
     function handleA2(message) {
     	if (saltState !== STATE_A1A2) {
-    		error('A2: Invalid internal state: ' + saltState)
+    		errorAndThrow('A2: Invalid internal state: ' + saltState)
     		return
     	}
         let a2 = new Uint8Array(message)
 
         if (validHeader(a2, 9, 129)) {
-        	error('A2: NoSuchServer exception')
+        	errorAndThrow('A2: NoSuchServer exception')
         	return
         }
         if (!validHeader(a2, 9, 128)) {
-        	error('A2: Bad packet header. Expected 9 128, was ' +
+        	errorAndThrow('A2: Bad packet header. Expected 9 128, was ' +
         		a2[0] + ' ' + a2[1])
         	return
         }
@@ -188,31 +191,29 @@ export default function(ws, timeKeeper, timeChecker) {
         let count = a2[offset++]
 
         if (count < 1 || count > 127) {
-            error('A2: Count must be in range [1, 127], was: ' + count)
+            errorAndThrow('A2: Count must be in range [1, 127], was: ' + count)
             return
         }
 
         if (a2.length !== count*20 + 3) {
-            error('A2: Expected packet length ' + (count*20 + 3) +
+            errorAndThrow('A2: Expected packet length ' + (count*20 + 3) +
             	' was ' + a2.length)
             return
         }
 
         let prots = []
-        let low = 33
-        let high = 126
         for (let i = 0; i < count; i++) {
         	let p1 = ''
         	let p2 = ''
 
         	for (let j = 0; j < 10; j++) {
         		if (!validPStringChar(a2[offset])) {
-        			error('A2: Invalid char in p1 "' +
+        			errorAndThrow('A2: Invalid char in p1 "' +
         				String.fromCharCode(a2[offset]) + '"')
         			return
         		}
         		if (!validPStringChar(a2[offset + 10])) {
-        			error('A2: Invalid char in p2 "' +
+        			errorAndThrow('A2: Invalid char in p2 "' +
         				String.fromCharCode(a2[offset + 10]) + '"')
         			return
         		}
@@ -226,13 +227,9 @@ export default function(ws, timeKeeper, timeChecker) {
 
         saltState = STATE_LAST
 
-        if (typeof onA2Response === 'function') {
-        	onA2Response(prots)
-        } else {
-        	console.error('saltchannel.onA2Response not set')
-        }
+        close() // ToDo Should this be here?
 
-        close()
+		return prots
     }
 
     function validPStringChar(byteValue) {
@@ -471,10 +468,6 @@ export default function(ws, timeKeeper, timeChecker) {
 	// =================================================
 
 	// ================ SET FUNCTIONS ==================
-	function setOnA2Response(callback) {
-    	onA2Response = callback
-    }
-
     function setOnerror(callback) {
     	onerror = callback
     }
@@ -791,7 +784,6 @@ export default function(ws, timeKeeper, timeChecker) {
 
 		getState: getState,
 
-		setOnA2Response: setOnA2Response,
 		setOnError: setOnerror,
 		setOnClose: setOnclose
 	}

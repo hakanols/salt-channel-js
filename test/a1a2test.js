@@ -1,6 +1,8 @@
 import saltChannelSession from '../src/saltchannel.js';
 import * as util from '../lib/util.js';
 import nacl from '../lib/nacl-fast-es.js';
+import test from './tap-esm.js';
+
 
 let serverSecret =
 	util.hex2ab('7a772fa9014b423300076a2ff646463952f141e2aa8d98263c690c0d72eed52d' +
@@ -8,21 +10,57 @@ let serverSecret =
 
 let serverSigKeyPair = nacl.sign.keyPair.fromSecretKey(serverSecret)
 
-let mockSocket = {
-	close: closeMockSocket,
-	readyState: 1
-}
+function createMockSocket(){
 
-function closeMockSocket() {
-	mockSocket.readyState = 3
+    let readQueue = util.waitQueue();
+    let closeQueue = util.waitQueue();
+
+	let mockSocketInterface = {
+		onerror: (e) => console.error('ERROR: ', e),
+		onclose: () => {},
+        onmessage: (e) => {},
+		close: function(){
+            closeQueue.push("");
+        },
+		send: function(event){
+            readQueue.push(event);
+        },
+        //https://developer.mozilla.org/en-US/docs/Web/API/WebSocket/readyState
+		CONNECTING: 0,
+		OPEN: 1,
+		CLOSING: 2,
+		CLOSED: 3,
+		readyState: undefined
+	}
+
+    let testInterface = {
+        receive: async function(waitTime){
+            return (await readQueue.pull(waitTime))[0];
+        },
+        send: function(message){
+            mockSocketInterface.onmessage({data: message})
+        },
+        receiveClose: async function(waitTime){
+            await closeQueue.pull(waitTime)
+            return
+        },
+        sendClose: function(){
+            mockSocketInterface.onclose()
+        },
+        sendError: function(message){
+            mockSocketInterface.onerror(message)
+        },
+        setState: function(state){
+            mockSocketInterface.readyState = state
+        },
+        serverData: undefined
+    }
+
+	return [ mockSocketInterface, testInterface ]
 }
 
 let sendA2
 let sc
-
-let currentTest
-let passCount = 0
-let testCount = 0
 
 let expectedProtCount
 let byteZero = 9
@@ -31,96 +69,147 @@ let badLength
 let badByte
 let errorMsg
 
-export function run(){
-	console.log('======= A1A2 TESTS STARTING =======')
 
-	mockSocket.send = validateA1Any
-	currentTest = 'oneProt'
-	runTest(send1Prot)
+test('oneProt', async function (t) {
+    let sc = await runTest(t, validateA1Any, create1Prot)
+	t.equal(sc.getState(), 'closed', 'Check stateAfterA1A2' )
+	t.end();
+})
 
-	currentTest = 'stateAfterA1A2'
-	stateAfterA1A2()
+test('twoProts', async function (t) {
+    await runTest(t, validateA1Any, create2Prots)
+	t.end();
+})
 
-	currentTest = 'twoProts'
-	runTest(send2Prots)
+test('maxProts', async function (t) {
+	await runTest(t, validateA1Any, create127Prots)
+	t.end();
+})
+test('nonInit', async function (t) {
+	const  expectedError = 'A1A2: Invalid internal state: a1a2'
+	let [mockSocket, testSocket] = createMockSocket()
+    testSocket.setState(mockSocket.OPEN)
 
-	currentTest = 'maxProts'
-	runTest(send127Prots)
+    let serverPromise = async function(){
+        await util.sleep(500)
+		let a2 = create1Prot()
+        testSocket.send(a2)
+    }()
 
-	currentTest = 'nonInit'
-	errorMsg = 'A1A2: Invalid internal state: a1a2'
-	runTest(sendOnBadState)
+	sc = saltChannelSession(mockSocket)
+	sc.setOnError(onError(t, expectedError))
+	sc.setOnClose(doNothing)
 
-	currentTest = 'badPacketLength'
+	let a1a2Promise = sc.a1a2()
+
+    t.throws(async function(){
+        await sc.a1a2()
+    }, expectedError)
+
+	let a2 = await a1a2Promise;
+	validateA2Response(t, a2)
+
+	await serverPromise;
+	t.end();
+})
+
+test('badPacketLength', async function (t) {
 	errorMsg = 'A2: Expected packet length 23 was 43'
-	runTest(sendBadPacketLength)
-
-	currentTest = 'badPacketHeader1'
+	t.throws(async function(){
+    	await runTest(t, validateA1Any, createBadPacketLength)
+	}, errorMsg)
+	t.end();
+})
+/*
+test('badPacketHeader1', async function (t) {
 	errorMsg = 'A2: Bad packet header. Expected 9 128, was 0 128'
-	runTest(sendBadPacketHeader1)
+    await runTest(sendBadPacketHeader1)
+	t.end();
+})
 
-	currentTest = 'badPacketHeader2'
+test('badPacketHeader2', async function (t) {
 	errorMsg = 'A2: Bad packet header. Expected 9 128, was 9 0'
-	runTest(sendBadPacketHeader2)
+    await runTest(sendBadPacketHeader2)
 
 	mockSocket.send = validateA1Pub
-	currentTest = 'addressPub'
-	runTest(send1Prot, 1, serverSigKeyPair.publicKey)
+	t.end();
+})
+
+test('addressPub', async function (t) {
+    await runTest(send1Prot, 1, serverSigKeyPair.publicKey)
 
 	mockSocket.send = validateA1ZeroPub
-	currentTest = 'noSuchServer'
+	t.end();
+})
+
+test('noSuchServer', async function (t) {
 	errorMsg = 'A2: NoSuchServer exception'
-	runTest(sendNoSuchServer, 1, new Uint8Array(32))
+    await runTest(sendNoSuchServer, 1, new Uint8Array(32))
 
 	mockSocket.send = null
-	currentTest = 'badAdressType'
+	t.end();
+})
+
+test('badAdressType', async function (t) {
 	errorMsg = 'A1A2: Unsupported adress type: 2'
 	runTest2(null, 2, null)
 
 	mockSocket.send = validateA1Any
-	currentTest = 'badCharInP1'
+	t.end();
+})
+
+test('badCharInP1', async function (t) {
 	errorMsg = 'A2: Invalid char in p1 " "'
-	runTest(sendBadCharInP1)
+    await runTest(sendBadCharInP1)
+	t.end();
+})
 
-	currentTest = 'badCharInP2'
+test('badCharInP2', async function (t) {
 	errorMsg = 'A2: Invalid char in p2 " "'
-	runTest(sendBadCharInP2)
+    await runTest(sendBadCharInP2)
+	t.end();
+})
 
-	currentTest = 'badCount1'
+test('badCount1', async function (t) {
 	errorMsg = 'A2: Count must be in range [1, 127], was: 0'
-	runTest(sendBadCount1)
+    await runTest(sendBadCount1)
+	t.end();
+})
 
-	currentTest = 'badCount2'
+test('badCount2', async function (t) {
 	errorMsg = 'A2: Count must be in range [1, 127], was: 128'
-	runTest(sendBadCount2)
+    await runTest(sendBadCount2)
+	t.end();
+})*/
 
+async function runTest(t, validateA1, createaA2, adressType, adress) {
+	let [mockSocket, testSocket] = createMockSocket()
+    testSocket.setState(mockSocket.OPEN)
 
-	if (passCount === testCount) {
-		console.log('======= ALL ' + testCount + ' A1A2 TESTS PASSED! =======\n')
-	} else {
-		console.log('======= ' + passCount + '/' + testCount +
-			 ' OF A1A2 TESTS PASSED! =======\n')
-	}
-}
-
-function runTest(send, adressType, adress) {
-	testCount++
-	sendA2 = send
-	mockSocket.readyState = 1
+    let serverPromise = async function(){
+        let a1 = await testSocket.receive(1000)
+        validateA1(t, a1)
+		let a2 = createaA2()
+        testSocket.send(a2)
+    }()
 
 	sc = saltChannelSession(mockSocket)
-	sc.setOnA2Response(onA2Response)
-	sc.setOnError(onError)
+	sc.setOnError(onError(t, errorMsg))
 	sc.setOnClose(doNothing)
-	sc.a1a2(adressType, adress)
+
+	let a2 = await sc.a1a2(adressType, adress)
+	validateA2Response(t, a2)
+
+	await serverPromise;
+
+	return sc
 }
 
 function runTest2(send, adressType, adress) {
-	testCount++
 	sendA2 = send
 
 	sc = saltChannelSession(mockSocket)
-	sc.setOnA2Response(onA2Response)
+	sc.setOnA2Response(validateA2Response)
 	sc.setOnError(onError)
 	sc.setOnClose(doNothing)
 	let success = false
@@ -142,7 +231,7 @@ function doNothing() {
  * Creates a minimal correct A2 message containing a single
  * protocol tuple
  */
-function send1Prot() {
+function create1Prot() {
 	let a2 = new Uint8Array(23)
 
 	expectedProtCount = 1
@@ -159,15 +248,13 @@ function send1Prot() {
 		a2[13+i] = p2.charCodeAt(i)
 	}
 
-	let evt = {}
-	evt.data = a2.buffer
-	mockSocket.onmessage(evt)
+	return a2
 }
 
 /*
  * Creates an A2 message containing two protocol tuples
  */
-function send2Prots() {
+function create2Prots() {
 	let a2 = new Uint8Array(43)
 
 	expectedProtCount = 2
@@ -188,15 +275,13 @@ function send2Prots() {
 		a2[33+i] = p22.charCodeAt(i)
 	}
 
-	let evt = {}
-	evt.data = a2.buffer
-	mockSocket.onmessage(evt)
+	return a2
 }
 
 /*
  * Creates an A2 message containing 127 protocol tuples
  */
-function send127Prots() {
+function create127Prots() {
 	let a2 = new Uint8Array(2543)
 
 	expectedProtCount = 127
@@ -216,13 +301,11 @@ function send127Prots() {
 		}
 	}
 
-	let evt = {}
-	evt.data = a2.buffer
-	mockSocket.onmessage(evt)
+	return a2
 }
 
 
-function sendBadPacketLength() {
+function createBadPacketLength() {
 	badLength = 43
 	let a2 = new Uint8Array(badLength)
 
@@ -240,9 +323,7 @@ function sendBadPacketLength() {
 		a2[13+i] = p2.charCodeAt(i)
 	}
 
-	let evt = {}
-	evt.data = a2.buffer
-	mockSocket.onmessage(evt)
+	return a2
 }
 
 function sendBadPacketHeader1() {
@@ -389,43 +470,14 @@ function sendBadCount2() {
  * Validates A1 message.
  * Always {0x08, 0x00}
  */
-function validateA1Any(message) {
+function validateA1Any(t, message) {
 	let a1 = new Uint8Array(message)
-	let success = true
-	let msg = ''
 
-	if (a1.length !== 5) {
-		success = false
-		msg += '  Invalid A1 length. Expected 5, was ' + a1.length + '\n'
-	}
-
-	if (a1[0] !== 8) {
-		success = false
-		msg += '  Invalid first byte. Expected 8, was ' + a1[0] + '\n'
-	}
-
-	if (a1[1] !== 0) {
-		success = false
-		msg += '  Invalid second byte. Expected 0, was ' + a1[1] + '\n'
-	}
-
-	if (a1[2] !== 0) {
-		success = false
-		msg += '  Invalid address type. Expected 0, was ' + a1[2]
-	}
-
-	if (a1[3] !== 0 || a1[4] !== 0) {
-		success = false
-		msg += '  Invalid address size. Expected 0 0, was ' +
-			 a1[3] + ' ' + a1[4]
-	}
-
-	if (!success) {
-		outcome(success, msg)
-		return
-	}
-
-	sendA2()
+	t.equal(a1.length, 5, 'Check A1 length')
+	t.equal(a1[0], 8, 'Check first byte.')
+	t.equal(a1[1],  0, 'Check second byte.')
+	t.equal(a1[2], 0, 'Check address type.')
+	t.arrayEqual(a1.slice(3, 6), [0, 0], 'Check address size.')
 }
 
 function validateA1Pub(message) {
@@ -517,81 +569,28 @@ function validateA1ZeroPub(message) {
 	sendA2()
 }
 
-/*
- * Checks the following properties of return value from reading A2
- * 		The expected number of array elements were returned
- *		The array elements contain members p1 and p2 that are strings
- *		The p1 and p2 strings are of length 10
- */
-function onA2Response(prots) {
-	let success
-	let msg = ''
-	if (prots.length !== expectedProtCount ) {
-		msg = '  Expected ' + expectedProtCount + ' protocol tuples, got ' + prots.length
-		success = false
-	} else {
-		success = true
-		for (let i = 0; i < prots.length; i++) {
-			let p1 = prots[i].p1
-			let p2 = prots[i].p2
-			if (!util.isString(p1)) {
-				msg += '  p1 of element ' + i + ' is not a string\n'
-				success = false
-			} else {
-				if (p1.length != 10) {
-					msg += '  p1 of element ' + i + ' has bad length: ' + p1.length + '\n'
-					success = false
-				}
-			}
-			if (!util.isString(p2)) {
-				msg += '  p2 of element ' + i + ' is not a string\n'
-				success = false
-			} else {
-				if (p2.length != 10) {
-					msg += '  p2 of element ' + i + ' has bad length: ' + p2.length + '\n'
-					success = false
-				}
-			}
+function validateA2Response(t, prots) {
+	t.equal(prots.length, expectedProtCount, 'Check protocol tuple count')
+	prots.forEach((prot, index) => {
+		// Duble check to minimize printout for testcases with many prots
+		if (!util.isString(prot.p1)) {
+			t.ok(util.isString(prot.p1), 'Check prot '+index+' p1 is string')
 		}
-
-	}
-
-	outcome(success, msg)
+		if (prot.p1.length !== 10) {
+			t.equal(prot.p1.length, 10, 'Check prot '+index+' p1 length')
+		}
+		if (!util.isString(prot.p2)) {
+			t.ok(util.isString(prot.p2), 'Check prot '+index+' p2 is string')
+		}
+		if (prot.p2.length !== 10) {
+			t.equal(prot.p2.length, 10, 'Check prot '+index+' p2 length')
+		}
+    });
 }
 
+function onError(t, expectedErr) {
+	return function (err){
+		t.equal(err.message, expectedErr, 'Check error')
 
-function onError(err) {
-	let success
-	let msg = err.message
-	if (msg === errorMsg) {
-		success = true
-	} else {
-		success = false
-	}
-
-	outcome(success, '  ' + msg)
-}
-
-
-function stateAfterA1A2() {
-	testCount++
-	if (sc.getState() === 'closed') {
-		outcome(true)
-	} else {
-		outcome(false, '  Invalid state after A1A2: ' + sc.getState())
 	}
 }
-
-
-/*
- * Prints outcome of current test
- */
-function outcome(success, msg) {
-	if (success) {
-		passCount++
-		//console.log(currentTest + ' PASSED')
-	} else {
-		console.log(currentTest + ' FAILED! \n' + msg)
-	}
-}
-
