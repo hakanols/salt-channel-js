@@ -4,6 +4,7 @@ import nacl from '../lib/nacl-fast-es.js';
 import getTimeKeeper from '../src/time/typical-time-keeper.js';
 import getNullTimeKeeper from '../src/time/null-time-keeper.js';
 import test from './tap-esm.js';
+import * as misc from './misc.js'
 
 const session1M1Bytes = util.hex2ab('534376320100000000008520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a')
 const session1M2Bytes = util.hex2ab('020000000000de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f')
@@ -59,60 +60,12 @@ let serverEphKeyPair = {
 
 let sessionKey = util.hex2ab('1b27556473e985d462cd51197a9a46c76009549eac6474f206c4ee0844f68389')
 
-
-function createMockSocket(){
-
-    let readQueue = util.waitQueue();
-    let closeQueue = util.waitQueue();
-
-	let mockSocketInterface = {
-		onerror: (e) => console.error('ERROR: ', e),
-		onclose: () => {},
-        onmessage: (e) => {},
-		close: function(){
-            closeQueue.push("");
-        },
-		send: function(event){
-            readQueue.push(event);
-        },
-        //https://developer.mozilla.org/en-US/docs/Web/API/WebSocket/readyState
-		CONNECTING: 0,
-		OPEN: 1,
-		CLOSING: 2,
-		CLOSED: 3,
-		readyState: undefined
-	}
-
-    let testInterface = {
-        receive: async function(waitTime){
-            return (await readQueue.pull(waitTime))[0];
-        },
-        send: function(message){
-            mockSocketInterface.onmessage({data: message})
-        },
-        receiveClose: async function(waitTime){
-            await closeQueue.pull(waitTime)
-            return
-        },
-        sendClose: function(){
-            mockSocketInterface.onclose()
-        },
-        sendError: function(message){
-            mockSocketInterface.onerror(message)
-        },
-        setState: function(state){
-            mockSocketInterface.readyState = state
-        },
-        serverData: undefined
-    }
-
-	return [ mockSocketInterface, testInterface ]
-}
-
 function doNothing() {}
 
+//////////////////////////////////////////////////////////
+
 test('session1', async function (t) {
-	let [mockSocket, testSocket] = createMockSocket()
+	let [mockSocket, testSocket] = misc.createMockSocket()
     testSocket.setState(mockSocket.OPEN)
 
     let serverPromise = async function(){
@@ -141,7 +94,7 @@ test('session1', async function (t) {
 })
 
 test('session2', async function (t) {
-	let [mockSocket, testSocket] = createMockSocket()
+	let [mockSocket, testSocket] = misc.createMockSocket()
     testSocket.setState(mockSocket.OPEN)
 
     let serverPromise = async function(){
@@ -164,7 +117,7 @@ test('session2', async function (t) {
 })
 
 test('session3', async function (t) {
-	let [mockSocket, testSocket] = createMockSocket()
+	let [mockSocket, testSocket] = misc.createMockSocket()
     testSocket.setState(mockSocket.OPEN)
 
 	let time = 0;
@@ -211,7 +164,7 @@ test('session3', async function (t) {
 })
 
 test('session1', async function (t) {
-	let [mockSocket, testSocket] = createMockSocket()
+	let [mockSocket, testSocket] = misc.createMockSocket()
     testSocket.setState(mockSocket.OPEN)
 
     let serverPromise = async function(){

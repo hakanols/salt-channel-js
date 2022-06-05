@@ -3,6 +3,7 @@ import * as util from '../lib/util.js';
 import nacl from '../lib/nacl-fast-es.js';
 import getTimeChecker from '../src/time/typical-time-checker.js';
 import test from './tap-esm.js'
+import * as misc from './misc.js'
 
 const clientSecret =
     util.hex2ab('fd2956eb37782aabddc97eaf3b9e1b075f4976770db56c11e866e8763fa073d8' +
@@ -43,98 +44,8 @@ const bigPayload = util.hex2ab('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +
     const PacketTypeM4  = 4
     const PacketTypeApp = 5
     const PacketTypeEncrypted = 6
-    const PacketTypeA1  = 8
-    const PacketTypeA2  = 9
     const PacketTypeMultiApp = 11
 
-//////////////////////////////////////////////////////////////////////////////////////////////
-
-function createMockSocket(){
-
-    let readQueue = util.waitQueue();
-    let closeQueue = util.waitQueue();
-
-	let mockSocketInterface = {
-		onerror: (e) => console.error('ERROR: ', e),
-		onclose: () => {},
-        onmessage: (e) => {},
-		close: function(){
-            closeQueue.push("");
-        },
-		send: function(event){
-            readQueue.push(event);
-        },
-        //https://developer.mozilla.org/en-US/docs/Web/API/WebSocket/readyState
-		CONNECTING: 0,
-		OPEN: 1,
-		CLOSING: 2,
-		CLOSED: 3,
-		readyState: undefined
-	}
-
-    let testInterface = {
-        receive: async function(waitTime){
-            return (await readQueue.pull(waitTime))[0];
-        },
-        send: function(message){
-            mockSocketInterface.onmessage({data: message})
-        },
-        receiveClose: async function(waitTime){
-            await closeQueue.pull(waitTime)
-            return
-        },
-        sendClose: function(){
-            mockSocketInterface.onclose()
-        },
-        sendError: function(message){
-            mockSocketInterface.onerror(message)
-        },
-        setState: function(state){
-            mockSocketInterface.readyState = state
-        },
-        serverData: undefined
-    }
-
-	return [ mockSocketInterface, testInterface ]
-}
-
-async function testServerSide(t, testInterface, clientEphPub, serverSigPub, threshold){        
-    testInterface.serverData = createServerData();
-
-    let m1 = await testInterface.receive(1000)
-    validateM1(t, testInterface.serverData, m1, clientEphPub, serverSigPub)
-    testInterface.send(createM2(testInterface.serverData))
-    testInterface.send(createM3(testInterface.serverData))
-    let m4 = await testInterface.receive(1000)
-    validateM4(t, testInterface.serverData, m4, threshold)
-}
-
-function createErrorWaiter(sc){
-    let errorQueue = util.waitQueue();
-    sc.setOnError(function(err) {
-        errorQueue.push(err.message);
-    })
-    return async function(waitTime){
-        return (await errorQueue.pull(waitTime))[0];
-    }
-}
-
-function createServerData(){
-    let eNonce = new Uint8Array(nacl.secretbox.nonceLength)
-    let dNonce = new Uint8Array(nacl.secretbox.nonceLength)
-    eNonce[0] = 2
-    dNonce[0] = 1
-
-    return {
-        eNonce: eNonce,
-        dNonce: dNonce,
-        sessionKey: undefined,
-        m1Hash: undefined,
-        m2Hash: undefined,
-        cEpoch: undefined,
-        sEpoch: undefined
-    }
-}
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -144,7 +55,7 @@ test('minimal', async function (t) {
 });
 
 test('withServSigKey', async function (t) {
-    let [mockSocketInterface, testInterface] = createMockSocket()
+    let [mockSocketInterface, testInterface] = misc.createMockSocket()
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
@@ -250,7 +161,7 @@ test('receiveMultiAppPacket', async function (t) {
 
 test('receiveBadEncryption', async function (t) {
     let [sc, testInterface] = await standardHandshake(t);
-    let errorWaiter = createErrorWaiter(sc);
+    let errorWaiter = misc.createErrorWaiter(sc);
 
     let appPacket1 = new Uint8Array(7)
     appPacket1[0] = 5
@@ -285,12 +196,12 @@ test('receiveBadEncryption', async function (t) {
 });
 
 test('receiveDelayed', async function (t) {
-    let [mockSocketInterface, testInterface] = createMockSocket()
+    let [mockSocketInterface, testInterface] = misc.createMockSocket()
     testInterface.setState(mockSocketInterface.OPEN)
 
     let timeChecker = getTimeChecker(util.currentTimeMs, 10)
     let sc = saltChannelSession(mockSocketInterface, undefined, timeChecker)
-    let errorWaiter = createErrorWaiter(sc);
+    let errorWaiter = misc.createErrorWaiter(sc);
 
     sc.setOnClose(doNothing)
 
@@ -371,7 +282,7 @@ test('withBadServSigKey', async function (t) {
 
 test('receiveBadHeaderEnc1', async function (t) {
     let [sc, testInterface] = await standardHandshake(t);
-    let errorWaiter = createErrorWaiter(sc);
+    let errorWaiter = misc.createErrorWaiter(sc);
     const expectedError = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 1 0' 
     const badData = new Uint8Array([1, 0])
     testInterface.send(createBadHeaderEnc(testInterface.serverData, badData))
@@ -382,7 +293,7 @@ test('receiveBadHeaderEnc1', async function (t) {
 
 test('receiveBadHeaderEnc2', async function (t) {
     let [sc, testInterface] = await standardHandshake(t);
-    let errorWaiter = createErrorWaiter(sc);
+    let errorWaiter = misc.createErrorWaiter(sc);
     const expectedError = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 6 2'
     const badData = new Uint8Array([6, 2])
     testInterface.send(createBadHeaderEnc(testInterface.serverData, badData))
@@ -393,7 +304,7 @@ test('receiveBadHeaderEnc2', async function (t) {
 
 test('receiveBadHeaderApp1', async function (t) {
     let [sc, testInterface] = await standardHandshake(t);
-    let errorWaiter = createErrorWaiter(sc);
+    let errorWaiter = misc.createErrorWaiter(sc);
     const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 0 0'
     const badData = new Uint8Array([0, 0])
     testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
@@ -404,7 +315,7 @@ test('receiveBadHeaderApp1', async function (t) {
 
 test('receiveBadHeaderApp2', async function (t) {
     let [sc, testInterface] = await standardHandshake(t);
-    let errorWaiter = createErrorWaiter(sc);
+    let errorWaiter = misc.createErrorWaiter(sc);
     const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 5 1'
     const badData = new Uint8Array([5, 1])
     testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
@@ -415,7 +326,7 @@ test('receiveBadHeaderApp2', async function (t) {
 
 test('receiveBadHeaderApp3', async function (t) {
     let [sc, testInterface] = await standardHandshake(t);
-    let errorWaiter = createErrorWaiter(sc);
+    let errorWaiter = misc.createErrorWaiter(sc);
     const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 11 1'
     const badData = new Uint8Array([11, 1])
     testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
@@ -479,11 +390,11 @@ test('receiveBadHeaderM34', async function (t) {
 test('receiveBadPubEph', async function (t) {
     const expectedError = 'EncryptedMessage: Could not decrypt message'
 
-    let [mockSocketInterface, testInterface] = createMockSocket()
+    let [mockSocketInterface, testInterface] = misc.createMockSocket()
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
-    let errorWaiter = createErrorWaiter(sc);
+    let errorWaiter = misc.createErrorWaiter(sc);
     sc.setOnClose(doNothing)
 
     let serverPromise = async function(){
@@ -819,8 +730,36 @@ function validateMultiAppPacket(t, serverData, message, expectedData, lastFlag) 
 // ==================================================================
 // ==================================================================
 
+async function testServerSide(t, testInterface, clientEphPub, serverSigPub, threshold){        
+    testInterface.serverData = createServerData();
+
+    let m1 = await testInterface.receive(1000)
+    validateM1(t, testInterface.serverData, m1, clientEphPub, serverSigPub)
+    testInterface.send(createM2(testInterface.serverData))
+    testInterface.send(createM3(testInterface.serverData))
+    let m4 = await testInterface.receive(1000)
+    validateM4(t, testInterface.serverData, m4, threshold)
+}
+
+function createServerData(){
+    let eNonce = new Uint8Array(nacl.secretbox.nonceLength)
+    let dNonce = new Uint8Array(nacl.secretbox.nonceLength)
+    eNonce[0] = 2
+    dNonce[0] = 1
+
+    return {
+        eNonce: eNonce,
+        dNonce: dNonce,
+        sessionKey: undefined,
+        m1Hash: undefined,
+        m2Hash: undefined,
+        cEpoch: undefined,
+        sEpoch: undefined
+    }
+}
+
 async function standardHandshake(t){
-    let [mockSocketInterface, testInterface] = createMockSocket()
+    let [mockSocketInterface, testInterface] = misc.createMockSocket()
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
@@ -841,11 +780,11 @@ async function standardHandshake(t){
 }
 
 async function testBadM2(t, m2, sigKey, expectedError){
-    let [mockSocketInterface, testInterface] = createMockSocket()
+    let [mockSocketInterface, testInterface] = misc.createMockSocket()
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
-    let errorWaiter = createErrorWaiter(sc);
+    let errorWaiter = misc.createErrorWaiter(sc);
     sc.setOnClose(doNothing)
 
     let serverPromise = async function(){
@@ -864,11 +803,11 @@ async function testBadM2(t, m2, sigKey, expectedError){
 }
 
 async function testBadM3(t, badData, sigKey, expectedError){
-    let [mockSocketInterface, testInterface] = createMockSocket()
+    let [mockSocketInterface, testInterface] = misc.createMockSocket()
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
-    let errorWaiter = createErrorWaiter(sc);
+    let errorWaiter = misc.createErrorWaiter(sc);
     sc.setOnClose(doNothing)
 
     let serverPromise = async function(){

@@ -2,61 +2,13 @@ import saltChannelSession from '../src/saltchannel.js';
 import * as util from '../lib/util.js';
 import nacl from '../lib/nacl-fast-es.js';
 import test from './tap-esm.js';
+import * as misc from './misc.js'
 
-let serverSecret =
+const serverSecret =
 	util.hex2ab('7a772fa9014b423300076a2ff646463952f141e2aa8d98263c690c0d72eed52d' +
 						'07e28d4ee32bfdc4b07d41c92193c0c25ee6b3094c6296f373413b373d36168b')
 
-let serverSigKeyPair = nacl.sign.keyPair.fromSecretKey(serverSecret)
-
-function createMockSocket(){
-
-    let readQueue = util.waitQueue();
-    let closeQueue = util.waitQueue();
-
-	let mockSocketInterface = {
-		onerror: (e) => console.error('ERROR: ', e),
-		onclose: () => {},
-        onmessage: (e) => {},
-		close: function(){
-            closeQueue.push("");
-        },
-		send: function(event){
-            readQueue.push(event);
-        },
-        //https://developer.mozilla.org/en-US/docs/Web/API/WebSocket/readyState
-		CONNECTING: 0,
-		OPEN: 1,
-		CLOSING: 2,
-		CLOSED: 3,
-		readyState: undefined
-	}
-
-    let testInterface = {
-        receive: async function(waitTime){
-            return (await readQueue.pull(waitTime))[0];
-        },
-        send: function(message){
-            mockSocketInterface.onmessage({data: message})
-        },
-        receiveClose: async function(waitTime){
-            await closeQueue.pull(waitTime)
-            return
-        },
-        sendClose: function(){
-            mockSocketInterface.onclose()
-        },
-        sendError: function(message){
-            mockSocketInterface.onerror(message)
-        },
-        setState: function(state){
-            mockSocketInterface.readyState = state
-        },
-        serverData: undefined
-    }
-
-	return [ mockSocketInterface, testInterface ]
-}
+const serverSigKeyPair = nacl.sign.keyPair.fromSecretKey(serverSecret)
 
 const PacketTypeA1  = 8
 const PacketTypeA2  = 9
@@ -81,7 +33,7 @@ test('maxProts', async function (t) {
 })
 test('nonInit', async function (t) {
 	const  expectedError = 'A1A2: Invalid internal state: a1a2'
-	let [mockSocket, testSocket] = createMockSocket()
+	let [mockSocket, testSocket] = misc.createMockSocket()
     testSocket.setState(mockSocket.OPEN)
 
     let serverPromise = async function(){
@@ -185,7 +137,7 @@ test('badCount2', async function (t) {
 })
 
 async function runTest(t, validateA1, createaA2, expectedError, adressType, adress) {
-	let [mockSocket, testSocket] = createMockSocket()
+	let [mockSocket, testSocket] = misc.createMockSocket()
     testSocket.setState(mockSocket.OPEN)
 
     let serverPromise = async function(){
