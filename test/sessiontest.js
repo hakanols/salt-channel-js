@@ -3,7 +3,7 @@ import * as util from '../lib/util.js';
 import nacl from '../lib/nacl-fast-es.js';
 import getTimeKeeper from '../src/time/typical-time-keeper.js';
 import getNullTimeKeeper from '../src/time/null-time-keeper.js';
-
+import test from './tap-esm.js';
 
 const session1M1Bytes = util.hex2ab('534376320100000000008520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a')
 const session1M2Bytes = util.hex2ab('020000000000de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f')
@@ -17,6 +17,8 @@ const session2A1Bytes = util.hex2ab('0800012000080808080808080808080808080808080
 const session2A2Bytes = util.hex2ab('098001534376322d2d2d2d2d2d4543484f2d2d2d2d2d2d')
 const adress = util.hex2ab('0808080808080808080808080808080808080808080808080808080808080808')
 const adressType = 1
+const p1 = 'SCv2------'
+const p2 = 'ECHO------'
 
 const session3M1Bytes = util.hex2ab('534376320100010000008520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a')
 const session3M2Bytes = util.hex2ab('020001000000de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f')
@@ -58,331 +60,181 @@ let serverEphKeyPair = {
 let sessionKey = util.hex2ab('1b27556473e985d462cd51197a9a46c76009549eac6474f206c4ee0844f68389')
 
 
+function createMockSocket(){
 
-let passCount = 0
-let testCount = 0
-let currentTest
+    let readQueue = util.waitQueue();
+    let closeQueue = util.waitQueue();
 
-let mockSocket = {
-	close: closeMockSocket,
-    readyState: 1
-}
-
-function closeMockSocket() {
-    mockSocket.readyState = 3
-}
-
-let sc
-let time
-let timeKeeper
-
-export function run(){
-	console.log('======= SESSION TESTS STARTING! =======')
-
-	session1()
-
-	session2()
-
-	session3()
-
-	session4()
-
-	if (passCount === testCount) {
-		console.log('======= ALL ' + testCount + ' SESSION TESTS PASSED! =======\n')
-	} else {
-		console.log('======= ' + passCount + '/' + testCount +
-			 ' OF SESSION TESTS PASSED! =======\n')
-	}
-}
-
-function session1() {
-	currentTest = 'session1'
-	testCount++
-
-	mockSocket.send = session1M1
-	mockSocket.readyState = 1
-
-	time = 0
-	timeKeeper = getNullTimeKeeper()
-	sc = saltChannelSession(mockSocket, timeKeeper)
-	sc.setOnHandshakeComplete(session1HandshakeComplete)
-	sc.setOnClose(sessionClose)
-	sc.setOnMessage(session1Echo)
-
-	sc.handshake(clientSigKeyPair, clientEphKeyPair)
-
-}
-function session1M1(message) {
-	if (!util.bufferEquals(message, session1M1Bytes)) {
-		outcome(false, 'Unexpected M1 bytes')
-		return
+	let mockSocketInterface = {
+		onerror: (e) => console.error('ERROR: ', e),
+		onclose: () => {},
+        onmessage: (e) => {},
+		close: function(){
+            closeQueue.push("");
+        },
+		send: function(event){
+            readQueue.push(event);
+        },
+        //https://developer.mozilla.org/en-US/docs/Web/API/WebSocket/readyState
+		CONNECTING: 0,
+		OPEN: 1,
+		CLOSING: 2,
+		CLOSED: 3,
+		readyState: undefined
 	}
 
-	mockSocket.send = session1M4
+    let testInterface = {
+        receive: async function(waitTime){
+            return (await readQueue.pull(waitTime))[0];
+        },
+        send: function(message){
+            mockSocketInterface.onmessage({data: message})
+        },
+        receiveClose: async function(waitTime){
+            await closeQueue.pull(waitTime)
+            return
+        },
+        sendClose: function(){
+            mockSocketInterface.onclose()
+        },
+        sendError: function(message){
+            mockSocketInterface.onerror(message)
+        },
+        setState: function(state){
+            mockSocketInterface.readyState = state
+        },
+        serverData: undefined
+    }
 
-	sendOnMockSocket(session1M2Bytes)
-	sendOnMockSocket(session1M3Bytes)
+	return [ mockSocketInterface, testInterface ]
 }
-function session1M4(message) {
-	if (!util.bufferEquals(message, session1M4Bytes)) {
-		outcome(false, 'Unexpected M4 bytes')
-		return
-	}
-}
-function session1HandshakeComplete() {
-	if (sc.getState() !== 'ready') {
-		outcome(false, 'Bad status: ' + sc.getState())
-		return
-	}
-	mockSocket.send = session1App
 
+function doNothing() {}
+
+test('session1', async function (t) {
+	let [mockSocket, testSocket] = createMockSocket()
+    testSocket.setState(mockSocket.OPEN)
+
+    let serverPromise = async function(){
+        let m1 = await testSocket.receive(1000)
+		t.arrayEqual(new Uint8Array(m1), session1M1Bytes, 'Check M1')
+        testSocket.send(session1M2Bytes)
+        testSocket.send(session1M3Bytes)
+		let m4 = await testSocket.receive(1000)
+		t.arrayEqual(new Uint8Array(m4), session1M4Bytes, 'Check M4')
+		let app = await testSocket.receive(1000)
+		t.arrayEqual(new Uint8Array(app), session1AppBytes, 'Check App')
+        testSocket.send(session1EchoBytes)
+    }()
+
+	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
+	sc.setOnError(doNothing)
+	sc.setOnClose(doNothing)
+
+	await sc.handshake(clientSigKeyPair, clientEphKeyPair)
 	sc.send(false, request)
-}
-function session1App(message) {
-	if (!util.bufferEquals(message, session1AppBytes)) {
-		outcome(false, 'Bad app request bytes')
-		return
-	}
+	let echo = await sc.receive(1000)
+	t.arrayEqual(new Uint8Array(echo), request, 'Check echo')
 
-	sendOnMockSocket(session1EchoBytes)
-}
-function session1Echo(message) {
-	if (!util.bufferEquals(message, request)) {
-		outcome(false, 'Message did not match request')
-		return
-	}
-}
+	await serverPromise;
+	t.end();
+})
 
+test('session2', async function (t) {
+	let [mockSocket, testSocket] = createMockSocket()
+    testSocket.setState(mockSocket.OPEN)
 
+    let serverPromise = async function(){
+        let a1 = await testSocket.receive(1000)
+		t.arrayEqual(new Uint8Array(a1), session2A1Bytes, 'Check A1')
+        testSocket.send(session2A2Bytes)
+    }()
 
+	let sc = saltChannelSession(mockSocket)
+	sc.setOnError(doNothing)
+	sc.setOnClose(doNothing)
 
+	let prots = await sc.a1a2(adressType, adress)
+	t.equal(prots.length, 1, 'Check prots length')
+	t.arrayEqual(prots[0].p1, p1, 'Check p1')
+	t.arrayEqual(prots[0].p2, p2, 'Check p2')
 
+	await serverPromise;
+	t.end();
+})
 
-function session2() {
-	currentTest = 'session2'
-	testCount++
+test('session3', async function (t) {
+	let [mockSocket, testSocket] = createMockSocket()
+    testSocket.setState(mockSocket.OPEN)
 
-	mockSocket.send = session2A1
-	mockSocket.readyState = 1
-
-	sc = saltChannelSession(mockSocket)
-	sc.setOnA2Response(session2A2)
-	sc.setOnClose(sessionClose)
-
-	sc.a1a2(adressType, adress)
-
-}
-function session2A1(message) {
-	if (!util.bufferEquals(message, session2A1Bytes)) {
-		outcome(false, 'Message did not match expected A1')
-		return
-	}
-
-	sendOnMockSocket(session2A2Bytes)
-}
-function session2A2(prots) {
-	let p1 = 'SCv2------'
-	let p2 = 'ECHO------'
-
-	if (prots.length !== 1) {
-		outcome(false, 'Bad prots length')
-		return
-	}
-	if (p1 !== prots[0].p1) {
-		outcome(false, 'p1 did not match expected')
-		return
-	}
-	if (p2 !== prots[0].p2) {
-		outcome(false, 'p2 did not match expected')
-		return
-	}
-}
-
-
-
-
-function getTime() {
-	if (time === 0) {
+	let time = 0;
+	function getTime() {
+		if (time === 0) {
+			time++
+			return 0
+		}
 		time++
-		return 0
-	}
-	time++
-	return time
-}
-function session3() {
-	currentTest = 'session3'
-	testCount++
-
-	mockSocket.send = session3M1
-	mockSocket.readyState = 1
-
-	time = 0
-	timeKeeper = getTimeKeeper(getTime)
-	sc = saltChannelSession(mockSocket, timeKeeper)
-	sc.setOnHandshakeComplete(session3HandshakeComplete)
-	sc.setOnClose(sessionClose)
-	sc.setOnMessage(session3Echo1)
-
-	sc.handshake(clientSigKeyPair, clientEphKeyPair)
-
-}
-function session3M1(message) {
-	if (!util.bufferEquals(message, session3M1Bytes)) {
-		outcome(false, 'Unexpected M1 bytes')
-		return
+		return time
 	}
 
-	mockSocket.send = session3M4
+    let serverPromise = async function(){
+        let m1 = await testSocket.receive(1000)
+		t.arrayEqual(new Uint8Array(m1), session3M1Bytes, 'Check M1')
+        testSocket.send(session3M2Bytes)
+        testSocket.send(session3M3Bytes)
+		let m4 = await testSocket.receive(1000)
+		t.arrayEqual(new Uint8Array(m4), session3M4Bytes, 'Check M4')
+		let app = await testSocket.receive(1000)
+		t.arrayEqual(new Uint8Array(app), session3App1Bytes, 'Check App')
+        testSocket.send(session3Echo1Bytes)
+		let multi = await testSocket.receive(1000)
+		t.arrayEqual(new Uint8Array(multi), session3MultiBytes, 'Check App')
+        testSocket.send(session3Echo2Bytes)
+    }()
 
-	sendOnMockSocket(session3M2Bytes)
-	sendOnMockSocket(session3M3Bytes)
-}
-function session3M4(message) {
-	if (!util.bufferEquals(message, session3M4Bytes)) {
-		outcome(false, 'Unexpected M4 bytes')
-		return
-	}
-}
-function session3HandshakeComplete() {
-	if (sc.getState() !== 'ready') {
-		outcome(false, 'Bad status: ' + sc.getState())
-		return
-	}
+	let sc = saltChannelSession(mockSocket, getTimeKeeper(getTime))
+	sc.setOnError(doNothing)
+	sc.setOnClose(doNothing)
 
-	mockSocket.send = session3App
-
+	await sc.handshake(clientSigKeyPair, clientEphKeyPair)
 	sc.send(false, request)
-}
-function session3App(message) {
-	if (!util.bufferEquals(message, session3App1Bytes)) {
-		outcome(false, 'Bad app request bytes')
-		return
-	}
-
-	sendOnMockSocket(session3Echo1Bytes)
-}
-function session3Echo1(message) {
-	if (!util.bufferEquals(message, request)) {
-		outcome(false, 'Message did not match request')
-		return
-	}
-
-	mockSocket.send = session3Multi
-
+	let echo1 = await sc.receive(1000)
+	t.arrayEqual(new Uint8Array(echo1), request, 'Check echo')
 	sc.send(false, multi1, multi2)
-}
-function session3Multi(message) {
-	if (!util.bufferEquals(message, session3MultiBytes)) {
-		outcome(false, 'Mutli message did not match expected')
-		return
-	}
-	sc.setOnMessage(session3Echo21)
+	let echo2 = await sc.receive(1000)
+	t.arrayEqual(new Uint8Array(echo2), multi1, 'Check multi1')
+	let echo3 = await sc.receive(1000)
+	t.arrayEqual(new Uint8Array(echo3), multi2, 'Check multi2')
 
-	sendOnMockSocket(session3Echo2Bytes)
-}
-function session3Echo21(message) {
-	if (!util.bufferEquals(message, multi1)) {
-		outcome(false, 'Message did not match multi1')
-		return
-	}
-	sc.setOnMessage(session3Echo22)
-}
-function session3Echo22(message) {
-	if (!util.bufferEquals(message, multi2)) {
-		outcome(false, 'Message did not match  multi2')
-		return
-	}
-}
+	await serverPromise;
+	t.end();
+})
 
+test('session1', async function (t) {
+	let [mockSocket, testSocket] = createMockSocket()
+    testSocket.setState(mockSocket.OPEN)
 
+    let serverPromise = async function(){
+        let m1 = await testSocket.receive(1000)
+		t.arrayEqual(new Uint8Array(m1), session4M1Bytes, 'Check M1')
+        testSocket.send(session4M2Bytes)
+        testSocket.send(session4M3Bytes)
+		let m4 = await testSocket.receive(1000)
+		t.arrayEqual(new Uint8Array(m4), session4M4Bytes, 'Check M4')
+		let app = await testSocket.receive(1000)
+		t.arrayEqual(new Uint8Array(app), session4AppBytes, 'Check App')
+        testSocket.send(session4EchoBytes)
+    }()
 
+	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
+	sc.setOnError(doNothing)
+	sc.setOnClose(doNothing)
 
-
-
-function session4() {
-	currentTest = 'session4'
-	testCount++
-
-	mockSocket.send = session4M1
-	mockSocket.readyState = 1
-
-	time = 0
-	timeKeeper = getNullTimeKeeper()
-	sc = saltChannelSession(mockSocket, timeKeeper)
-	sc.setOnHandshakeComplete(session4HandshakeComplete)
-	sc.setOnClose(sessionClose)
-	sc.setOnMessage(session4Echo)
-
-	sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey)
-
-}
-function session4M1(message) {
-	if (!util.bufferEquals(message, session4M1Bytes)) {
-		outcome(false, 'Unexpected M1 bytes')
-		return
-	}
-
-	mockSocket.send = session4M4
-
-	sendOnMockSocket(session4M2Bytes)
-	sendOnMockSocket(session4M3Bytes)
-}
-function session4M4(message) {
-	if (!util.bufferEquals(message, session4M4Bytes)) {
-		outcome(false, 'Unexpected M4 bytes')
-		return
-	}
-}
-function session4HandshakeComplete() {
-	if (sc.getState() !== 'ready') {
-		outcome(false, 'Bad status: ' + sc.getState())
-		return
-	}
-	mockSocket.send = session4App
-
+	await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey)
 	sc.send(false, request)
-}
-function session4App(message) {
-	if (!util.bufferEquals(message, session4AppBytes)) {
-		outcome(false, 'Bad app request bytes')
-		return
-	}
+	let echo = await sc.receive(1000)
+	t.arrayEqual(new Uint8Array(echo), request, 'Check echo')
 
-	sendOnMockSocket(session4EchoBytes)
-}
-function session4Echo(message) {
-	if (!util.bufferEquals(message, request)) {
-		outcome(false, 'Message did not match request')
-		return
-	}
-}
-
-
-
-
-
-
-
-
-
-
-function sessionClose(state) {
-	if (state !== 'last') {
-		outcome(false, 'Expected close state to be "last"')
-		return
-	}
-	outcome(true)
-}
-
-function sendOnMockSocket(data) {
-	mockSocket.onmessage({data: data})
-}
-
-function outcome(success, msg) {
-	if (success) {
-		passCount++
-		//console.log(testCount + '. ' + currentTest + ' PASSED')
-	} else {
-		console.log(testCount + '. ' + currentTest + ' FAILED! \n  ' + msg)
-	}
-}
+	await serverPromise;
+	t.end();
+})
