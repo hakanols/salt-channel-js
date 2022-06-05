@@ -37,15 +37,15 @@ const bigPayload = util.hex2ab('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +
     '77777777777777777777777777777777777777778888888888888888888888888888888888888888' +
     '9999999999999999999999999999999999999999ffffffffffffffffffffffffffffffffffffffff')
 
-    const PacketTypeM1  = 1       
-    const PacketTypeM2  = 2      
-    const PacketTypeM3  = 3       
-    const PacketTypeM4  = 4       
-    const PacketTypeApp = 5       
-    const PacketTypeEncrypted = 6       
-    const PacketTypeA1  = 8       
-    const PacketTypeA2  = 9       
-    const PacketTypeMultiApp = 11     
+    const PacketTypeM1  = 1
+    const PacketTypeM2  = 2
+    const PacketTypeM3  = 3
+    const PacketTypeM4  = 4
+    const PacketTypeApp = 5
+    const PacketTypeEncrypted = 6
+    const PacketTypeA1  = 8
+    const PacketTypeA2  = 9
+    const PacketTypeMultiApp = 11
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
