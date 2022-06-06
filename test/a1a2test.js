@@ -14,7 +14,7 @@ const PacketTypeA1  = 8
 const PacketTypeA2  = 9
 const LastFlag = 128
 
-let expectedProtCount
+//////////////////////////////////////////////////
 
 test('oneProt', async function (t) {
     let sc = await runTest(t, validateA1Any, create1Prot)
@@ -35,10 +35,10 @@ test('nonInit', async function (t) {
 	const  expectedError = 'A1A2: Invalid internal state: a1a2'
 	let [mockSocket, testSocket] = misc.createMockSocket()
     testSocket.setState(mockSocket.OPEN)
+	let[a2, expectedProtCount] = create1Prot()
 
     let serverPromise = async function(){
         await util.sleep(500)
-		let a2 = create1Prot()
         testSocket.send(a2)
     }()
 
@@ -52,8 +52,8 @@ test('nonInit', async function (t) {
         await sc.a1a2()
     }, expectedError)
 
-	let a2 = await a1a2Promise;
-	validateA2Response(t, a2)
+	let prots = await a1a2Promise;
+	validateA2Response(t, prots, expectedProtCount)
 
 	await serverPromise;
 	t.end();
@@ -136,14 +136,16 @@ test('badCount2', async function (t) {
 	t.end();
 })
 
+//////////////////////////////////////////////////
+
 async function runTest(t, validateA1, createaA2, expectedError, adressType, adress) {
 	let [mockSocket, testSocket] = misc.createMockSocket()
     testSocket.setState(mockSocket.OPEN)
+	let [a2, expectedProtCount] = createaA2()
 
     let serverPromise = async function(){
         let a1 = await testSocket.receive(1000)
         validateA1(t, a1)
-		let a2 = createaA2()
         testSocket.send(a2)
     }()
 
@@ -151,8 +153,8 @@ async function runTest(t, validateA1, createaA2, expectedError, adressType, adre
 	sc.setOnError(onError(t, expectedError))
 	sc.setOnClose(doNothing)
 
-	let a2 = await sc.a1a2(adressType, adress)
-	validateA2Response(t, a2)
+	let prots = await sc.a1a2(adressType, adress)
+	validateA2Response(t, prots, expectedProtCount)
 
 	await serverPromise;
 
@@ -168,7 +170,7 @@ function doNothing() {
  * protocol tuple
  */
 function create1Prot() {
-	expectedProtCount = 1
+	const expectedProtCount = 1
 
 	const p1 = [...'SCc2------'].map(letter=>letter.charCodeAt(0))
 	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
@@ -180,14 +182,14 @@ function create1Prot() {
 		...p1,
 		...p2
 	])
-	return a2
+	return [a2, expectedProtCount]
 }
 
 /*
  * Creates an A2 message containing two protocol tuples
  */
 function create2Prots() {
-	expectedProtCount = 2
+	const expectedProtCount = 2
 
 	const p11 = [...'SCv2------'].map(letter=>letter.charCodeAt(0))
 	const p12 = [...'-._AZaz9--'].map(letter=>letter.charCodeAt(0))
@@ -203,14 +205,14 @@ function create2Prots() {
 		...p21,
 		...p22
 	])
-	return a2
+	return [a2, expectedProtCount]
 }
 
 /*
  * Creates an A2 message containing 127 protocol tuples
  */
 function create127Prots() {
-	expectedProtCount = 127
+	const expectedProtCount = 127
 
 	const p1 = [...'SCv2------'].map(letter=>letter.charCodeAt(0))
 	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
@@ -227,12 +229,12 @@ function create127Prots() {
 			...p2
 		])
 	}
-	return a2
+	return [a2, expectedProtCount]
 }
 
 
 function createBadPacketLength() {
-	expectedProtCount = 1
+	const expectedProtCount = 1
 
 	const p1 = [...'SCc2------'].map(letter=>letter.charCodeAt(0))
 	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
@@ -245,12 +247,12 @@ function createBadPacketLength() {
 		...p2,
 		...new Uint8Array(20)
 	])
-	return a2
+	return [a2, expectedProtCount]
 }
 
 function createBadPacketHeader1() {
 	const badByte = 0
-	expectedProtCount = 1
+	const expectedProtCount = 1
 
 	const p1 = [...'SCc2------'].map(letter=>letter.charCodeAt(0))
 	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
@@ -263,12 +265,12 @@ function createBadPacketHeader1() {
 		...p2,
 		...new Uint8Array(20)
 	])
-	return a2
+	return [a2, expectedProtCount]
 }
 
 function createBadPacketHeader2() {
 	const badByte = 0
-	expectedProtCount = 1
+	const expectedProtCount = 1
 
 	const p1 = [...'SCc2------'].map(letter=>letter.charCodeAt(0))
 	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
@@ -281,7 +283,7 @@ function createBadPacketHeader2() {
 		...p2,
 		...new Uint8Array(20)
 	])
-	return a2
+	return [a2, expectedProtCount]
 }
 
 
@@ -291,11 +293,11 @@ function createNoSuchServer() {
 		129,
 		0
 	])
-	return a2
+	return [a2, expectedProtCount]
 }
 
 function createBadCharInP1() {
-	expectedProtCount = 1
+	const expectedProtCount = 1
 
 	const p1 = [...'SCc2 -----'].map(letter=>letter.charCodeAt(0))
 	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
@@ -307,11 +309,11 @@ function createBadCharInP1() {
 		...p1,
 		...p2
 	])
-	return a2
+	return [a2, expectedProtCount]
 }
 
 function createBadCharInP2() {
-	expectedProtCount = 1
+	const expectedProtCount = 1
 
 	const p1 = [...'SCc2------'].map(letter=>letter.charCodeAt(0))
 	const p2 = [...'--- ------'].map(letter=>letter.charCodeAt(0))
@@ -323,27 +325,27 @@ function createBadCharInP2() {
 		...p1,
 		...p2
 	])
-	return a2
+	return [a2, expectedProtCount]
 }
 
 function createBadCount1() {
-	expectedProtCount = 0
+	const expectedProtCount = 0
 	let a2 = new Uint8Array([
 		PacketTypeA2,
 		LastFlag,
 		expectedProtCount
 	])
-	return a2
+	return [a2, expectedProtCount]
 }
 
 function createBadCount2() {
-	expectedProtCount = 128
+	const expectedProtCount = 128
 	let a2 = new Uint8Array([
 		PacketTypeA2,
 		LastFlag,
 		expectedProtCount
 	])
-	return a2
+	return [a2, expectedProtCount]
 }
 
 /*
@@ -382,7 +384,7 @@ function validateA1ZeroPub(t, message) {
 	t.arrayEqual(a1.slice(5, 37), new Uint8Array(32), 'Check adress')
 }
 
-function validateA2Response(t, prots) {
+function validateA2Response(t, prots, expectedProtCount) {
 	t.equal(prots.length, expectedProtCount, 'Check protocol tuple count')
 	prots.forEach((prot, index) => {
 		// Duble check to minimize printout for testcases with many prots
