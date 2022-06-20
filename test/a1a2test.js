@@ -386,7 +386,7 @@ function validateA1ZeroPub(t, message) {
 
 function validateA2Response(t, prots, expectedProtCount) {
 	t.equal(prots.length, expectedProtCount, 'Check protocol tuple count')
-	prots.forEach((prot, index) => {
+	for ( const[index, prot] of prots.entries()){
 		// Duble check to minimize printout for testcases with many prots
 		if (!util.isString(prot.p1)) {
 			t.ok(util.isString(prot.p1), 'Check prot '+index+' p1 is string')
@@ -400,7 +400,7 @@ function validateA2Response(t, prots, expectedProtCount) {
 		if (prot.p2.length !== 10) {
 			t.equal(prot.p2.length, 10, 'Check prot '+index+' p2 length')
 		}
-    });
+    }
 }
 
 function onError(t, expectedErr) {

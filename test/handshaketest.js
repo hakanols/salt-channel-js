@@ -515,13 +515,13 @@ function createAppPacket(serverData, message) {
 
 function createMultiAppPacketBody(messages) {
     let packet = numberTo8Array(messages.length)
-    messages.forEach(message => {
+    for (const message of messages){
         let size = numberTo8Array(message.length)
         packet= new Uint8Array([
             ...packet, 
             ...size,
             ...message])
-    });
+    };
     return packet
 }
 
