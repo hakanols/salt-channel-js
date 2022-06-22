@@ -42,7 +42,6 @@ test('nonInit', async function (t) {
     }()
 
 	let sc = saltChannelSession(mockSocket)
-	sc.setOnClose(doNothing)
 
 	let a1a2Promise = sc.a1a2()
 
@@ -148,7 +147,6 @@ async function runTest(t, validateA1, createaA2, adressType, adress) {
     }()
 
 	let sc = saltChannelSession(mockSocket)
-	sc.setOnClose(doNothing)
 
 	let prots = await sc.a1a2(adressType, adress)
 	validateA2Response(t, prots, expectedProtCount)

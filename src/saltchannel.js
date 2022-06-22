@@ -67,14 +67,11 @@ export default function(ws, timeKeeper, timeChecker) {
 	let ephemeralKeyPair
 	let receiveQueue = util.waitQueue();
 	let messageQueue = [];
+	let closeTrigger = util.triggWaiter()
 
 	timeKeeper = (timeKeeper) ? timeKeeper : getTimeKeeper(util.currentTimeMs)
 	timeChecker = (timeChecker) ? timeChecker : getTimeChecker(util.currentTimeMs)
 	let saltState
-
-	// Set by calling corresponding set-function
-	let onerror
-	let onclose
 
 	init()
 
@@ -88,17 +85,13 @@ export default function(ws, timeKeeper, timeChecker) {
 		signKeyPair = undefined
 		ephemeralKeyPair = undefined
 
-		let state = saltState
 		saltState = STATE_CLOSED
 
 		timeKeeper.reset()
 		timeChecker.reset()
 
+		closeTrigger.trigg()
 		ws.close()
-
-		if (typeof onclose === 'function') {
-			onclose(state)
-		}
 	}
 
 	function init() {
@@ -121,13 +114,13 @@ export default function(ws, timeKeeper, timeChecker) {
 	async function receive(waitTime){
 		let message = messageQueue.shift();
 		if (message != undefined){
-			return message;
+			return message
 		}
 
-		let data = await receiveData(waitTime)
+		let data = await Promise.race([receiveData(waitTime), closeTrigger.waiter(waitTime+1000)])
 		if (data != null){
 			onmsg(data)
-			return messageQueue.shift();
+			return messageQueue.shift()
 		}
 		return null
 	}
@@ -289,8 +282,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		return {
 			send: send,
 			receive: receive,
-			getState: getState,
-			setOnClose: setOnclose
+			getState: getState
 		}
 	}
 
@@ -469,16 +461,6 @@ export default function(ws, timeKeeper, timeChecker) {
 		sendOnWs(encrypted.buffer)
 	}
 
-	// =================================================
-
-	// ================ SET FUNCTIONS ==================
-    function setOncloseAndThrow(callback) {
-    	onerror = callback
-    }
-
-	function setOnclose(callback) {
-		onclose = callback
-	}
 	// =================================================
 
 	function getState() {
@@ -770,7 +752,6 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	return {
 		a1a2: a1a2,
-		handshake: handshake,
-		setOnClose: setOnclose
+		handshake: handshake
 	}
 }

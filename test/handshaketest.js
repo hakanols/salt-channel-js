@@ -59,7 +59,6 @@ test('withServSigKey', async function (t) {
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
-    sc.setOnClose(doNothing)
 
     let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey, serverSigKeyPair.publicKey)
 
@@ -73,9 +72,9 @@ test('withServSigKey', async function (t) {
 });
 
 test('sendAppPacket1', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t)
+    let [channel, testInterface] = await standardHandshake(t)
 
-    sc.send(false, new Uint8Array([0]).buffer)
+    channel.send(false, new Uint8Array([0]).buffer)
     let app1 = await testInterface.receive(1000)
     validateAppPacket(t, testInterface.serverData, app1, new Uint8Array([0]), false)
 
@@ -83,10 +82,10 @@ test('sendAppPacket1', async function (t) {
 });
 
 test('sendAppPacket2', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t)
+    let [channel, testInterface] = await standardHandshake(t)
 
     let data = [new Uint8Array([0])]
-    sc.send(false, data)
+    channel.send(false, data)
     let app2 = await testInterface.receive(1000)
     validateAppPacket(t, testInterface.serverData, app2, [0], false)
 
@@ -94,13 +93,13 @@ test('sendAppPacket2', async function (t) {
 });
 
 test('receiveAppPacket', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t)
+    let [channel, testInterface] = await standardHandshake(t)
 
     let appPacket = createAppPacket(testInterface.serverData, [0])
     let encrypted = encrypt(testInterface.serverData, appPacket)
     testInterface.send(encrypted)
 
-    let message = await sc.receive(1000)
+    let message = await channel.receive(1000)
     t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
     t.arrayEqual(new Uint8Array(message), new Uint8Array(1), 'Unexpected data')
 
@@ -108,44 +107,44 @@ test('receiveAppPacket', async function (t) {
 });
 
 test('sendMultiAppPacket1', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t)
+    let [channel, testInterface] = await standardHandshake(t)
 
     let data = [new Uint8Array([0]).buffer, new Uint8Array([1])]
-    sc.send(false, data)
+    channel.send(false, data)
     let multiApp = await testInterface.receive(1000)
     validateMultiAppPacket(t, testInterface.serverData, multiApp, data, false)
 	t.end();
 });
 
 test('sendMultiAppPacket2', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t)
+    let [channel, testInterface] = await standardHandshake(t)
 
     let data = [new Uint8Array([0]), new Uint8Array([1]).buffer]
-    sc.send(false, data)
+    channel.send(false, data)
     let multiApp = await testInterface.receive(1000)
     validateMultiAppPacket(t, testInterface.serverData, multiApp, data, false)
 	t.end();
 });
 
 test('testSendBigMultiAppPacket', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t)
+    let [channel, testInterface] = await standardHandshake(t)
 
     let data = [new Uint8Array([0]), bigPayload]
-    sc.send(false, data)
+    channel.send(false, data)
     let multiApp = await testInterface.receive(1000)
     validateMultiAppPacket(t, testInterface.serverData, multiApp, data, false)
 	t.end();
 });
 
 test('receiveMultiAppPacket', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t)
+    let [channel, testInterface] = await standardHandshake(t)
 
     let multiAppPacket = createMultiAppPacket(testInterface.serverData, [[0], [1]])
     let encrypted = encrypt(testInterface.serverData, multiAppPacket)
     testInterface.send(encrypted)
 
-    let multiApp1 = await sc.receive(1000)
-    let multiApp2 = await sc.receive(1000)
+    let multiApp1 = await channel.receive(1000)
+    let multiApp2 = await channel.receive(1000)
 
     t.ok((multiApp1 instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
     t.arrayEqual(new Uint8Array(multiApp1), new Uint8Array([0]), 'Unexpected data')
@@ -200,8 +199,6 @@ test('receiveDelayed', async function (t) {
 
     let timeChecker = getTimeChecker(util.currentTimeMs, 10)
     let sc = saltChannelSession(mockSocketInterface, undefined, timeChecker)
-
-    sc.setOnClose(doNothing)
 
     const threshold = 20
     let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey, undefined, threshold)
@@ -391,7 +388,6 @@ test('receiveBadPubEph', async function (t) {
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
-    sc.setOnClose(doNothing)
 
     let serverPromise = async function(){
         testInterface.serverData = createServerData();
@@ -757,7 +753,6 @@ async function standardHandshake(t){
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
-    sc.setOnClose(doNothing)
 
     let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey)
 
@@ -775,7 +770,6 @@ async function testBadM2(t, m2, sigKey, expectedError){
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
-    sc.setOnClose(doNothing)
 
     let serverPromise = async function(){
         await testInterface.receive(1000)
@@ -795,7 +789,6 @@ async function testBadM3(t, badData, sigKey, expectedError){
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
-    sc.setOnClose(doNothing)
 
     let serverPromise = async function(){
         let serverData = createServerData()

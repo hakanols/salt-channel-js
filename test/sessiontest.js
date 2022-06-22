@@ -81,11 +81,10 @@ test('session1', async function (t) {
     }()
 
 	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
-	sc.setOnClose(doNothing)
 
-	let connection = await sc.handshake(clientSigKeyPair, clientEphKeyPair)
-	connection.send(false, request)
-	let echo = await connection.receive(1000)
+	let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair)
+	channel.send(false, request)
+	let echo = await channel.receive(1000)
 	t.arrayEqual(new Uint8Array(echo), request, 'Check echo')
 
 	await serverPromise;
@@ -103,7 +102,6 @@ test('session2', async function (t) {
     }()
 
 	let sc = saltChannelSession(mockSocket)
-	sc.setOnClose(doNothing)
 
 	let prots = await sc.a1a2(adressType, adress)
 	t.equal(prots.length, 1, 'Check prots length')
@@ -144,16 +142,15 @@ test('session3', async function (t) {
     }()
 
 	let sc = saltChannelSession(mockSocket, getTimeKeeper(getTime))
-	sc.setOnClose(doNothing)
 
-	let connection = await sc.handshake(clientSigKeyPair, clientEphKeyPair)
-	connection.send(false, request)
-	let echo1 = await connection.receive(1000)
+	let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair)
+	channel.send(false, request)
+	let echo1 = await channel.receive(1000)
 	t.arrayEqual(new Uint8Array(echo1), request, 'Check echo')
-	connection.send(false, multi1, multi2)
-	let echo2 = await connection.receive(1000)
+	channel.send(false, multi1, multi2)
+	let echo2 = await channel.receive(1000)
 	t.arrayEqual(new Uint8Array(echo2), multi1, 'Check multi1')
-	let echo3 = await connection.receive(1000)
+	let echo3 = await channel.receive(1000)
 	t.arrayEqual(new Uint8Array(echo3), multi2, 'Check multi2')
 
 	await serverPromise;
@@ -177,11 +174,10 @@ test('session4', async function (t) {
     }()
 
 	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
-	sc.setOnClose(doNothing)
 
-	let  connection = await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey)
-	connection.send(false, request)
-	let echo = await connection.receive(1000)
+	let  channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey)
+	channel.send(false, request)
+	let echo = await channel.receive(1000)
 	t.arrayEqual(new Uint8Array(echo), request, 'Check echo')
 
 	await serverPromise;
