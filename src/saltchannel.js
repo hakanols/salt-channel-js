@@ -787,9 +787,6 @@ export default function(ws, timeKeeper, timeChecker) {
 	return {
 		a1a2: a1a2,
 		handshake: handshake,
-
-		getState: getState,
-
 		setOnError: setOnerror,
 		setOnClose: setOnclose
 	}

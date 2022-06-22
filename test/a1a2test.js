@@ -18,7 +18,6 @@ const LastFlag = 128
 
 test('oneProt', async function (t) {
     let sc = await runTest(t, validateA1Any, create1Prot)
-	t.equal(sc.getState(), 'closed', 'Check stateAfterA1A2' )
 	t.end();
 })
 

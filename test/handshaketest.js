@@ -66,9 +66,9 @@ test('withServSigKey', async function (t) {
 
     let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey, serverSigKeyPair.publicKey)
 
-    await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey);
+    let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey);
 
-    t.equal(sc.getState(), 'ready', 'State is OPEN')
+    t.equal(channel.getState(), 'ready', 'State is OPEN')
 
     await serverPromise;
 
@@ -160,8 +160,8 @@ test('receiveMultiAppPacket', async function (t) {
 });
 
 test('receiveBadEncryption', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t);
-    let errorWaiter = misc.createErrorWaiter(sc);
+    let [channel, testInterface] = await standardHandshake(t);
+    let errorWaiter = misc.createErrorWaiter(channel);
 
     let appPacket1 = new Uint8Array(7)
     appPacket1[0] = 5
@@ -208,9 +208,9 @@ test('receiveDelayed', async function (t) {
     const threshold = 20
     let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey, undefined, threshold)
 
-    await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
+    let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
 
-    t.equal(sc.getState(), 'ready', 'State is OPEN')
+    t.equal(channel.getState(), 'ready', 'State is OPEN')
 
     await serverPromise;
 
@@ -240,32 +240,32 @@ test('receiveDelayed', async function (t) {
 });
 
 test('receiveLastFlag', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t);
+    let [channel, testInterface] = await standardHandshake(t);
 
     let appPacket = createAppPacket(testInterface.serverData, [0])
     let encrypted = encrypt(testInterface.serverData, appPacket, true)
     testInterface.send(encrypted)
 
-    let message = await sc.receive(1000)
+    let message = await channel.receive(1000)
     t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
     t.arrayEqual(new Uint8Array(message), new Uint8Array(1), 'Expected 1 zero byte, was ' + util.ab2hex(message));
 
     console.log('## stateAfterReceivedLastFlag')
-    t.equal(sc.getState(), 'closed', 'State not closed')
+    t.equal(channel.getState(), 'closed', 'State not closed')
 	t.end();
 });
 
 test('sendLastFlag', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t);
+    let [channel, testInterface] = await standardHandshake(t);
 
     let data = new Uint8Array(1)
-    sc.send(true, data);
+    channel.send(true, data);
 
     let message = await testInterface.receive(1000)
     validateAppPacket(t, testInterface.serverData, message, data, true)
 
 	console.log('## stateAfterSentLastFlag')
-    t.equal(sc.getState(), 'closed', 'State not closed')
+    t.equal(channel.getState(), 'closed', 'State not closed')
 	t.end();
 });
 
@@ -281,8 +281,8 @@ test('withBadServSigKey', async function (t) {
 });
 
 test('receiveBadHeaderEnc1', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t);
-    let errorWaiter = misc.createErrorWaiter(sc);
+    let [channel, testInterface] = await standardHandshake(t);
+    let errorWaiter = misc.createErrorWaiter(channel);
     const expectedError = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 1 0' 
     const badData = new Uint8Array([1, 0])
     testInterface.send(createBadHeaderEnc(testInterface.serverData, badData))
@@ -292,8 +292,8 @@ test('receiveBadHeaderEnc1', async function (t) {
 });
 
 test('receiveBadHeaderEnc2', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t);
-    let errorWaiter = misc.createErrorWaiter(sc);
+    let [channel, testInterface] = await standardHandshake(t);
+    let errorWaiter = misc.createErrorWaiter(channel);
     const expectedError = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 6 2'
     const badData = new Uint8Array([6, 2])
     testInterface.send(createBadHeaderEnc(testInterface.serverData, badData))
@@ -303,8 +303,8 @@ test('receiveBadHeaderEnc2', async function (t) {
 });
 
 test('receiveBadHeaderApp1', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t);
-    let errorWaiter = misc.createErrorWaiter(sc);
+    let [channel, testInterface] = await standardHandshake(t);
+    let errorWaiter = misc.createErrorWaiter(channel);
     const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 0 0'
     const badData = new Uint8Array([0, 0])
     testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
@@ -314,8 +314,8 @@ test('receiveBadHeaderApp1', async function (t) {
 });
 
 test('receiveBadHeaderApp2', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t);
-    let errorWaiter = misc.createErrorWaiter(sc);
+    let [channel, testInterface] = await standardHandshake(t);
+    let errorWaiter = misc.createErrorWaiter(channel);
     const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 5 1'
     const badData = new Uint8Array([5, 1])
     testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
@@ -325,8 +325,8 @@ test('receiveBadHeaderApp2', async function (t) {
 });
 
 test('receiveBadHeaderApp3', async function (t) {
-    let [sc, testInterface] = await standardHandshake(t);
-    let errorWaiter = misc.createErrorWaiter(sc);
+    let [channel, testInterface] = await standardHandshake(t);
+    let errorWaiter = misc.createErrorWaiter(channel);
     const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 11 1'
     const badData = new Uint8Array([11, 1])
     testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
@@ -772,7 +772,7 @@ async function standardHandshake(t){
 
     let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
 
-    t.equal(sc.getState(), 'ready', 'State is OPEN')
+    t.equal(channel.getState(), 'ready', 'State is OPEN')
 
     await serverPromise;
 
