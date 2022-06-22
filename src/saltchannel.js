@@ -289,6 +289,14 @@ export default function(ws, timeKeeper, timeChecker) {
 			onmsg(evt.data)
 		}
 		saltState = STATE_READY
+
+		return {
+			send: send,
+			receive: receive,
+			getState: getState,
+			setOnError: setOnerror,
+			setOnClose: setOnclose
+		}
 	}
 
 	function errorAndThrow(msg){
@@ -779,8 +787,6 @@ export default function(ws, timeKeeper, timeChecker) {
 	return {
 		a1a2: a1a2,
 		handshake: handshake,
-		send: send,
-		receive: receive,
 
 		getState: getState,
 

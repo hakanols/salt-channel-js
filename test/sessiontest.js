@@ -84,9 +84,9 @@ test('session1', async function (t) {
 	sc.setOnError(doNothing)
 	sc.setOnClose(doNothing)
 
-	await sc.handshake(clientSigKeyPair, clientEphKeyPair)
-	sc.send(false, request)
-	let echo = await sc.receive(1000)
+	let connection = await sc.handshake(clientSigKeyPair, clientEphKeyPair)
+	connection.send(false, request)
+	let echo = await connection.receive(1000)
 	t.arrayEqual(new Uint8Array(echo), request, 'Check echo')
 
 	await serverPromise;
@@ -149,21 +149,21 @@ test('session3', async function (t) {
 	sc.setOnError(doNothing)
 	sc.setOnClose(doNothing)
 
-	await sc.handshake(clientSigKeyPair, clientEphKeyPair)
-	sc.send(false, request)
-	let echo1 = await sc.receive(1000)
+	let connection = await sc.handshake(clientSigKeyPair, clientEphKeyPair)
+	connection.send(false, request)
+	let echo1 = await connection.receive(1000)
 	t.arrayEqual(new Uint8Array(echo1), request, 'Check echo')
-	sc.send(false, multi1, multi2)
-	let echo2 = await sc.receive(1000)
+	connection.send(false, multi1, multi2)
+	let echo2 = await connection.receive(1000)
 	t.arrayEqual(new Uint8Array(echo2), multi1, 'Check multi1')
-	let echo3 = await sc.receive(1000)
+	let echo3 = await connection.receive(1000)
 	t.arrayEqual(new Uint8Array(echo3), multi2, 'Check multi2')
 
 	await serverPromise;
 	t.end();
 })
 
-test('session1', async function (t) {
+test('session4', async function (t) {
 	let [mockSocket, testSocket] = misc.createMockSocket()
     testSocket.setState(mockSocket.OPEN)
 
@@ -183,9 +183,9 @@ test('session1', async function (t) {
 	sc.setOnError(doNothing)
 	sc.setOnClose(doNothing)
 
-	await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey)
-	sc.send(false, request)
-	let echo = await sc.receive(1000)
+	let  connection = await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey)
+	connection.send(false, request)
+	let echo = await connection.receive(1000)
 	t.arrayEqual(new Uint8Array(echo), request, 'Check echo')
 
 	await serverPromise;

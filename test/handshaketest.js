@@ -770,13 +770,13 @@ async function standardHandshake(t){
 
     let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey)
 
-    await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
+    let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
 
     t.equal(sc.getState(), 'ready', 'State is OPEN')
 
     await serverPromise;
 
-    return [sc, testInterface]
+    return [channel, testInterface]
 }
 
 async function testBadM2(t, m2, sigKey, expectedError){
