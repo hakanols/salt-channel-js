@@ -81,7 +81,6 @@ test('session1', async function (t) {
     }()
 
 	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
-	sc.setOnError(doNothing)
 	sc.setOnClose(doNothing)
 
 	let connection = await sc.handshake(clientSigKeyPair, clientEphKeyPair)
@@ -104,7 +103,6 @@ test('session2', async function (t) {
     }()
 
 	let sc = saltChannelSession(mockSocket)
-	sc.setOnError(doNothing)
 	sc.setOnClose(doNothing)
 
 	let prots = await sc.a1a2(adressType, adress)
@@ -146,7 +144,6 @@ test('session3', async function (t) {
     }()
 
 	let sc = saltChannelSession(mockSocket, getTimeKeeper(getTime))
-	sc.setOnError(doNothing)
 	sc.setOnClose(doNothing)
 
 	let connection = await sc.handshake(clientSigKeyPair, clientEphKeyPair)
@@ -180,7 +177,6 @@ test('session4', async function (t) {
     }()
 
 	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
-	sc.setOnError(doNothing)
 	sc.setOnClose(doNothing)
 
 	let  connection = await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey)

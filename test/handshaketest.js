@@ -59,9 +59,6 @@ test('withServSigKey', async function (t) {
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
-    sc.setOnError(function(err) {
-        t.fail('Got error: '+err)
-    })
     sc.setOnClose(doNothing)
 
     let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey, serverSigKeyPair.publicKey)
@@ -161,7 +158,6 @@ test('receiveMultiAppPacket', async function (t) {
 
 test('receiveBadEncryption', async function (t) {
     let [channel, testInterface] = await standardHandshake(t);
-    let errorWaiter = misc.createErrorWaiter(channel);
 
     let appPacket1 = new Uint8Array(7)
     appPacket1[0] = 5
@@ -179,18 +175,21 @@ test('receiveBadEncryption', async function (t) {
 
     testInterface.send(encrypted1)
 
-    let receivedError1 = await errorWaiter(1000) 
+    
     const errorMsg1 = 'EncryptedMessage: Could not decrypt message'   
-    t.equal(receivedError1, errorMsg1, "Expect error")
+    t.throws(async function(){
+        await channel.receive(1000)
+    }, errorMsg1)
 
     console.log('## receiveAfterError')
     let appPacket2 = createAppPacket(testInterface.serverData, [0])
     let encrypted2 = encrypt(testInterface.serverData, appPacket2)
     testInterface.send(encrypted2)
 
-    let receivedError2 = await errorWaiter(1000) 
     const errorMsg2 = 'Received message when salt channel was not ready' 
-    t.equal(receivedError2, errorMsg2, "Expect error")
+    t.throws(async function(){
+        await channel.receive(1000)
+    }, errorMsg2)
 
 	t.end();
 });
@@ -201,7 +200,6 @@ test('receiveDelayed', async function (t) {
 
     let timeChecker = getTimeChecker(util.currentTimeMs, 10)
     let sc = saltChannelSession(mockSocketInterface, undefined, timeChecker)
-    let errorWaiter = misc.createErrorWaiter(sc);
 
     sc.setOnClose(doNothing)
 
@@ -222,9 +220,10 @@ test('receiveDelayed', async function (t) {
     let encrypted = encrypt(testInterface.serverData, appPacket)
     testInterface.send(encrypted)
 
-    let receivedError1 = await errorWaiter(1000) 
     const errorMsg1 = '(Multi)AppPacket: Detected a delayed packet'
-    t.equal(receivedError1, errorMsg1, "Expect error")   
+    t.throws(async function(){
+        await channel.receive(1000)
+    }, errorMsg1)
 
     console.log('## handShakeAfterError')
     testInterface.serverData = createServerData();
@@ -233,8 +232,6 @@ test('receiveDelayed', async function (t) {
     t.throws(async function(){
         await sc.handshake(clientSigKeyPair, clientEphKeyPair)
     }, errorMsg2)
-    let receivedError2 = await errorWaiter(1000)
-    t.equal(receivedError2, errorMsg2, "Expect error")
     
 	t.end();
 });
@@ -282,56 +279,56 @@ test('withBadServSigKey', async function (t) {
 
 test('receiveBadHeaderEnc1', async function (t) {
     let [channel, testInterface] = await standardHandshake(t);
-    let errorWaiter = misc.createErrorWaiter(channel);
     const expectedError = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 1 0' 
     const badData = new Uint8Array([1, 0])
     testInterface.send(createBadHeaderEnc(testInterface.serverData, badData))
-    let receivedError = await errorWaiter(1000)
-    t.equal(receivedError, expectedError, "Expect error")
+    t.throws(async function(){
+        await channel.receive(1000)
+    }, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderEnc2', async function (t) {
     let [channel, testInterface] = await standardHandshake(t);
-    let errorWaiter = misc.createErrorWaiter(channel);
     const expectedError = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 6 2'
     const badData = new Uint8Array([6, 2])
     testInterface.send(createBadHeaderEnc(testInterface.serverData, badData))
-    let receivedError = await errorWaiter(1000)
-    t.equal(receivedError, expectedError, "Expect error")
+    t.throws(async function(){
+        await channel.receive(1000)
+    }, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderApp1', async function (t) {
     let [channel, testInterface] = await standardHandshake(t);
-    let errorWaiter = misc.createErrorWaiter(channel);
     const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 0 0'
     const badData = new Uint8Array([0, 0])
     testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
-    let receivedError = await errorWaiter(1000)
-    t.equal(receivedError, expectedError, "Expect error")
+    t.throws(async function(){
+        await channel.receive(1000)
+    }, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderApp2', async function (t) {
     let [channel, testInterface] = await standardHandshake(t);
-    let errorWaiter = misc.createErrorWaiter(channel);
     const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 5 1'
     const badData = new Uint8Array([5, 1])
     testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
-    let receivedError = await errorWaiter(1000)
-    t.equal(receivedError, expectedError, "Expect error")
+    t.throws(async function(){
+        await channel.receive(1000)
+    }, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderApp3', async function (t) {
     let [channel, testInterface] = await standardHandshake(t);
-    let errorWaiter = misc.createErrorWaiter(channel);
     const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 11 1'
     const badData = new Uint8Array([11, 1])
     testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
-    let receivedError = await errorWaiter(1000)
-    t.equal(receivedError, expectedError, "Expect error")
+    t.throws(async function(){
+        await channel.receive(1000)
+    }, expectedError)
 	t.end();
 });
 
@@ -394,7 +391,6 @@ test('receiveBadPubEph', async function (t) {
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
-    let errorWaiter = misc.createErrorWaiter(sc);
     sc.setOnClose(doNothing)
 
     let serverPromise = async function(){
@@ -408,8 +404,6 @@ test('receiveBadPubEph', async function (t) {
     t.throws(async function(){
         await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined)
     }, expectedError)
-    let receivedError = await errorWaiter(1000)
-    t.equal(receivedError, expectedError, "Expect error")
 
     await serverPromise
 	t.end();
@@ -763,9 +757,6 @@ async function standardHandshake(t){
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
-    sc.setOnError(function(err) {
-        t.fail('Got error: '+err.message)
-    })
     sc.setOnClose(doNothing)
 
     let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey)
@@ -784,7 +775,6 @@ async function testBadM2(t, m2, sigKey, expectedError){
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
-    let errorWaiter = misc.createErrorWaiter(sc);
     sc.setOnClose(doNothing)
 
     let serverPromise = async function(){
@@ -796,8 +786,6 @@ async function testBadM2(t, m2, sigKey, expectedError){
     t.throws(async function(){
         await sc.handshake(clientSigKeyPair, clientEphKeyPair, sigKey)
     }, expectedError)
-    let receivedError = await errorWaiter(1000)
-    t.equal(receivedError, expectedError, "Expect error")
 
     await serverPromise
 }
@@ -807,7 +795,6 @@ async function testBadM3(t, badData, sigKey, expectedError){
     testInterface.setState(mockSocketInterface.OPEN)
 
     let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
-    let errorWaiter = misc.createErrorWaiter(sc);
     sc.setOnClose(doNothing)
 
     let serverPromise = async function(){
@@ -827,8 +814,6 @@ async function testBadM3(t, badData, sigKey, expectedError){
     t.throws(async function(){
         await sc.handshake(clientSigKeyPair, clientEphKeyPair, sigKey)
     }, expectedError)
-    let receivedError = await errorWaiter(1000)
-    t.equal(receivedError, expectedError, "Expect error")
 
     await serverPromise
 }

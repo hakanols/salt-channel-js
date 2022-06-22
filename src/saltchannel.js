@@ -65,7 +65,8 @@ export default function(ws, timeKeeper, timeChecker) {
 	let hostPub
 	let signKeyPair
 	let ephemeralKeyPair
-	let readQueue = util.waitQueue();
+	let receiveQueue = util.waitQueue();
+	let messageQueue = [];
 
 	timeKeeper = (timeKeeper) ? timeKeeper : getTimeKeeper(util.currentTimeMs)
 	timeChecker = (timeChecker) ? timeChecker : getTimeChecker(util.currentTimeMs)
@@ -97,9 +98,6 @@ export default function(ws, timeKeeper, timeChecker) {
 
 		if (typeof onclose === 'function') {
 			onclose(state)
-		} else {
-			console.error('saltchannel.onClose not set')
-			console.error(state)
 		}
 	}
 
@@ -110,10 +108,28 @@ export default function(ws, timeKeeper, timeChecker) {
 		dNonce[0] = 2
 
 		saltState = STATE_INIT
+
+		ws.onmessage = function(event){
+			receiveQueue.push(new Uint8Array(event.data));
+		}
+	}
+
+	async function receiveData(waitTime){
+		return (await receiveQueue.pull(waitTime))[0];
 	}
 
 	async function receive(waitTime){
-		return (await readQueue.pull(waitTime))[0];
+		let message = messageQueue.shift();
+		if (message != undefined){
+			return message;
+		}
+
+		let data = await receiveData(waitTime)
+		if (data != null){
+			onmsg(data)
+			return messageQueue.shift();
+		}
+		return null
 	}
 
 	// =========== A1A2 MESSAGE EXCHANGE ================
@@ -123,17 +139,9 @@ export default function(ws, timeKeeper, timeChecker) {
         }
 		saltState = STATE_A1A2
 
-		let a1a2ReadQueue = util.waitQueue();
-		ws.onmessage = function(event){
-			a1a2ReadQueue.push(new Uint8Array(event.data));
-		}
-		async function a1a2Receive(waitTime){
-			return (await a1a2ReadQueue.pull(waitTime))[0];
-		}
-
 		let a1 = createA1(adressType, adress)
         ws.send(a1)
-		let a2 = await a1a2Receive(1000)
+		let a2 = await receiveData(1000)
 		let prots = handleA2(a2)
 		return prots
     }
@@ -173,17 +181,17 @@ export default function(ws, timeKeeper, timeChecker) {
 
     function handleA2(message) {
     	if (saltState !== STATE_A1A2) {
-    		errorAndThrow('A2: Invalid internal state: ' + saltState)
+    		closeAndThrow('A2: Invalid internal state: ' + saltState)
     		return
     	}
         let a2 = new Uint8Array(message)
 
         if (validHeader(a2, 9, 129)) {
-        	errorAndThrow('A2: NoSuchServer exception')
+        	closeAndThrow('A2: NoSuchServer exception')
         	return
         }
         if (!validHeader(a2, 9, 128)) {
-        	errorAndThrow('A2: Bad packet header. Expected 9 128, was ' +
+        	closeAndThrow('A2: Bad packet header. Expected 9 128, was ' +
         		a2[0] + ' ' + a2[1])
         	return
         }
@@ -191,12 +199,12 @@ export default function(ws, timeKeeper, timeChecker) {
         let count = a2[offset++]
 
         if (count < 1 || count > 127) {
-            errorAndThrow('A2: Count must be in range [1, 127], was: ' + count)
+            closeAndThrow('A2: Count must be in range [1, 127], was: ' + count)
             return
         }
 
         if (a2.length !== count*20 + 3) {
-            errorAndThrow('A2: Expected packet length ' + (count*20 + 3) +
+            closeAndThrow('A2: Expected packet length ' + (count*20 + 3) +
             	' was ' + a2.length)
             return
         }
@@ -208,12 +216,12 @@ export default function(ws, timeKeeper, timeChecker) {
 
         	for (let j = 0; j < 10; j++) {
         		if (!validPStringChar(a2[offset])) {
-        			errorAndThrow('A2: Invalid char in p1 "' +
+        			closeAndThrow('A2: Invalid char in p1 "' +
         				String.fromCharCode(a2[offset]) + '"')
         			return
         		}
         		if (!validPStringChar(a2[offset + 10])) {
-        			errorAndThrow('A2: Invalid char in p2 "' +
+        			closeAndThrow('A2: Invalid char in p2 "' +
         				String.fromCharCode(a2[offset + 10]) + '"')
         			return
         		}
@@ -262,45 +270,33 @@ export default function(ws, timeKeeper, timeChecker) {
 		verifyEphKeyPair(ephKeyPair)
 		verifyHostSigPub(hostSigPub)
 		if (saltState !== STATE_INIT) {
-			errorAndThrow('Handshake: Invalid internal state: ' + saltState)
+			closeAndThrow('Handshake: Invalid internal state: ' + saltState)
 		}
 		signKeyPair = sigKeyPair
 		ephemeralKeyPair = ephKeyPair
 		hostPub = hostSigPub
 		saltState = STATE_HAND
 
-		let handshakeReadQueue = util.waitQueue();
-		ws.onmessage = function(event){
-			handshakeReadQueue.push(new Uint8Array(event.data));
-		}
-		async function handshakeReceive(waitTime){
-			return (await handshakeReadQueue.pull(waitTime))[0];
-		}
-
 		sendM1()
-		let m2 = await handshakeReceive(1000)
+		let m2 = await receiveData(1000)
 		handleM2(m2)
-		let m3 = await handshakeReceive(1000)
+		let m3 = await receiveData(1000)
 		handleM3(m3)
 		sendM4()
 		
-
-		ws.onmessage = function(evt) {
-			onmsg(evt.data)
-		}
 		saltState = STATE_READY
 
 		return {
 			send: send,
 			receive: receive,
 			getState: getState,
-			setOnError: setOnerror,
 			setOnClose: setOnclose
 		}
 	}
 
-	function errorAndThrow(msg){
-		error(msg)
+	function closeAndThrow(msg){
+		saltState = STATE_ERR
+		close()
 		throw new Error(msg)
 	}
 
@@ -372,16 +368,16 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	function handleM2(m2) {
 		if (saltState !== STATE_HAND) {
-    		errorAndThrow('M2: Invalid internal state: ' + saltState)
+    		closeAndThrow('M2: Invalid internal state: ' + saltState)
     	}
 
 		// Header
 		if (validHeader(m2, 2, 0)) {
 
 		} else if (validHeader(m2, 2, 129)) {
-			errorAndThrow('M2: NoSuchServer exception')
+			closeAndThrow('M2: NoSuchServer exception')
 		} else {
-			errorAndThrow('M2: Bad packet header. Expected 2 0 or 2 129, was '
+			closeAndThrow('M2: Bad packet header. Expected 2 0 or 2 129, was '
 				+ m2[0] + ' ' + m2[1])
 		}
 
@@ -390,7 +386,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		if (time === 0) {
 			timeChecker = getNullTimeChecker()
 		} else if (time !== 1){
-			errorAndThrow('M2: Invalid time value ' + time)
+			closeAndThrow('M2: Invalid time value ' + time)
 		}
 
 		let serverPub = getUints(m2, 32, 6)
@@ -402,31 +398,31 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	function handleM3(data) {
 		if (saltState !== STATE_HAND) {
-    		errorAndThrow('M3: Invalid internal state: ' + saltState)
+    		closeAndThrow('M3: Invalid internal state: ' + saltState)
     	}
 
 		let m3 = decrypt(data)
 
 		if (!m3) {
-			errorAndThrow('EncryptedMessage: Could not decrypt message')
+			closeAndThrow('EncryptedMessage: Could not decrypt message')
 		}
 		// Header
 		if (!validHeader(m3, 3, 0)) {
-			errorAndThrow('M3: Bad packet header. Expected 3 0, was ' +
+			closeAndThrow('M3: Bad packet header. Expected 3 0, was ' +
 				m3[0] + ' ' + m3[1])
 		}
 
 		// Time
 		let time = getInt32(m3, 2)
 		if (timeChecker.delayed(time)) {
-			errorAndThrow('M3: Detected delayed packet')
+			closeAndThrow('M3: Detected delayed packet')
 		}
 
 		let serverPub = getUints(m3, 32, 6)
 
 		if (hostPub) {
 			if (!util.uint8ArrayEquals(serverPub, hostPub)) {
-				errorAndThrow('M3: ServerSigKey does not match expected')
+				closeAndThrow('M3: ServerSigKey does not match expected')
 			}
 		}
 
@@ -444,7 +440,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		let success = nacl.sign.detached.verify(concat, signature, serverPub)
 
 		if (!success) {
-			errorAndThrow('M3: Could not verify signature')
+			closeAndThrow('M3: Could not verify signature')
 		}
 	}
 
@@ -476,7 +472,7 @@ export default function(ws, timeKeeper, timeChecker) {
 	// =================================================
 
 	// ================ SET FUNCTIONS ==================
-    function setOnerror(callback) {
+    function setOncloseAndThrow(callback) {
     	onerror = callback
     }
 
@@ -497,21 +493,9 @@ export default function(ws, timeKeeper, timeChecker) {
 		}
 	}
 
-	function error(msg) {
-		saltState = STATE_ERR
-		if (typeof onerror === 'function') {
-			onerror(new Error(msg))
-		} else {
-			console.error('saltchannel.onerror not set')
-			console.error(new Error(msg))
-		}
-
-		close()
-	}
-
 	function onmsg(data) {
 		if (saltState !== STATE_READY) {
-			error('Received message when salt channel was not ready')
+			closeAndThrow('Received message when salt channel was not ready')
 			return
 		}
 
@@ -525,7 +509,7 @@ export default function(ws, timeKeeper, timeChecker) {
 
 		let time = getInt32(clear, 2)
 		if (timeChecker.delayed(time)) {
-			error('(Multi)AppPacket: Detected a delayed packet')
+			closeAndThrow('(Multi)AppPacket: Detected a delayed packet')
 			return
 		}
 
@@ -534,7 +518,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		} else if (validHeader(clear, 11, 0)) {
 			handleMultiAppPacket(clear)
 		} else {
-			error('(Multi)AppPacket: Bad packet header. ' +
+			closeAndThrow('(Multi)AppPacket: Bad packet header. ' +
 			'Expected 5 0 or 11 0, was ' + clear[0] + ' ' + clear[1])
 			return
 		}
@@ -547,7 +531,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		let count = getUint16(multiAppPacket, 6)
 
 		if (count === 0) {
-			error('MultiAppPacket: Zero application messages')
+			closeAndThrow('MultiAppPacket: Zero application messages')
 			return
 		}
 
@@ -559,14 +543,14 @@ export default function(ws, timeKeeper, timeChecker) {
 			let data = getUints(multiAppPacket, length, offset)
 			offset += length
 
-			readQueue.push(data.buffer);
+			messageQueue.push(data.buffer);
 		}
 	}
 
 	function handleAppPacket(appPacket) {
 
 		let data = getUints(appPacket, appPacket.length - 6, 6)
-		readQueue.push(data.buffer);
+		messageQueue.push(data.buffer);
 	}
 
 	function sendOnWs(message) {
@@ -584,7 +568,7 @@ export default function(ws, timeKeeper, timeChecker) {
 			// Last message
 			saltState = STATE_LAST;
 		} else {
-			error('EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was '
+			closeAndThrow('EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was '
 				+ message[0] + ' ' + message[1])
 			return null
 		}
@@ -600,7 +584,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		dNonce = increaseNonce2(dNonce)
 
 		if (!clear) {
-			error('EncryptedMessage: Could not decrypt message')
+			closeAndThrow('EncryptedMessage: Could not decrypt message')
 			return null
 		}
 		// clear.length < clear.buffer.byteLength
@@ -657,7 +641,7 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	function send(last, arg) {
 		if (saltState !== STATE_READY) {
-			errorAndThrow('Invalid state: ' + saltState)
+			closeAndThrow('Invalid state: ' + saltState)
 		}
 		if (last) {
 			saltState = STATE_LAST
@@ -760,11 +744,11 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	function increaseNonce(nonce) {
 		if (!(nonce instanceof Uint8Array)) {
-			errorAndThrow('Expected Uint8Array. \n\t' +
+			closeAndThrow('Expected Uint8Array. \n\t' +
 						'Input: ' + nonce)
 		}
 		if (!(nonce.length === nacl.secretbox.nonceLength)) {
-			errorAndThrow('Unexpected nonce length. \n\t' +
+			closeAndThrow('Unexpected nonce length. \n\t' +
 						'Length: ' + nonce.length)
 		}
 		nonce[0] += 1 // nonces are little endian
@@ -787,7 +771,6 @@ export default function(ws, timeKeeper, timeChecker) {
 	return {
 		a1a2: a1a2,
 		handshake: handshake,
-		setOnError: setOnerror,
 		setOnClose: setOnclose
 	}
 }

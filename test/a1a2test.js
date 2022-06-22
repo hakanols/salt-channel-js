@@ -42,7 +42,6 @@ test('nonInit', async function (t) {
     }()
 
 	let sc = saltChannelSession(mockSocket)
-	sc.setOnError(onError(t, expectedError))
 	sc.setOnClose(doNothing)
 
 	let a1a2Promise = sc.a1a2()
@@ -61,7 +60,7 @@ test('nonInit', async function (t) {
 test('badPacketLength', async function (t) {
 	const expectedError = 'A2: Expected packet length 23 was 43'
 	t.throws(async function(){
-    	await runTest(t, validateA1Any, createBadPacketLength, expectedError)
+    	await runTest(t, validateA1Any, createBadPacketLength)
 	}, expectedError)
 	t.end();
 })
@@ -69,7 +68,7 @@ test('badPacketLength', async function (t) {
 test('badPacketHeader1', async function (t) {
 	const expectedError  = 'A2: Bad packet header. Expected 9 128, was 0 128'
 	t.throws(async function(){
-		await runTest(t, validateA1Any, createBadPacketHeader1, expectedError)
+		await runTest(t, validateA1Any, createBadPacketHeader1)
 	}, expectedError)
 	t.end();
 })
@@ -77,20 +76,20 @@ test('badPacketHeader1', async function (t) {
 test('badPacketHeader2', async function (t) {
 	const expectedError  = 'A2: Bad packet header. Expected 9 128, was 9 0'
 	t.throws(async function(){
-		await runTest(t, validateA1Any, createBadPacketHeader2, expectedError)
+		await runTest(t, validateA1Any, createBadPacketHeader2)
 	}, expectedError)
 	t.end();
 })
 
 test('addressPub', async function (t) {
-    await runTest(t, validateA1Pub, create1Prot, null, 1, serverSigKeyPair.publicKey)
+    await runTest(t, validateA1Pub, create1Prot, 1, serverSigKeyPair.publicKey)
 	t.end();
 })
 
 test('noSuchServer', async function (t) {
 	const expectedError  = 'A2: NoSuchServer exception'
 	t.throws(async function(){
-		await runTest(t, validateA1ZeroPub, createNoSuchServer, expectedError, 1, new Uint8Array(32))
+		await runTest(t, validateA1ZeroPub, createNoSuchServer, 1, new Uint8Array(32))
 	}, expectedError)
 	t.end();
 })
@@ -98,7 +97,7 @@ test('noSuchServer', async function (t) {
 test('badAdressType', async function (t) {
 	const expectedError  = 'A1A2: Unsupported adress type: 2'
 	t.throws(async function(){
-		await runTest(t, doNothing, doNothing, expectedError, 2, null)
+		await runTest(t, doNothing, doNothing, 2, null)
 	}, expectedError)
 	t.end();
 })
@@ -106,7 +105,7 @@ test('badAdressType', async function (t) {
 test('badCharInP1', async function (t) {
 	const expectedError  = 'A2: Invalid char in p1 " "'
 	t.throws(async function(){
-		await runTest(t, validateA1Any, createBadCharInP1, expectedError)
+		await runTest(t, validateA1Any, createBadCharInP1)
 	}, expectedError)
 	t.end();
 })
@@ -114,7 +113,7 @@ test('badCharInP1', async function (t) {
 test('badCharInP2', async function (t) {
 	const expectedError  = 'A2: Invalid char in p2 " "'
 	t.throws(async function(){
-		await runTest(t, validateA1Any, createBadCharInP2, expectedError)
+		await runTest(t, validateA1Any, createBadCharInP2)
 	}, expectedError)
 	t.end();
 })
@@ -122,7 +121,7 @@ test('badCharInP2', async function (t) {
 test('badCount1', async function (t) {
 	const expectedError  = 'A2: Count must be in range [1, 127], was: 0'
 	t.throws(async function(){
-		await runTest(t, validateA1Any, createBadCount1, expectedError)
+		await runTest(t, validateA1Any, createBadCount1)
 	}, expectedError)
 	t.end();
 })
@@ -130,14 +129,14 @@ test('badCount1', async function (t) {
 test('badCount2', async function (t) {
 	const expectedError  = 'A2: Count must be in range [1, 127], was: 128'
 	t.throws(async function(){
-		await runTest(t, validateA1Any, createBadCount2, expectedError)
+		await runTest(t, validateA1Any, createBadCount2)
 	}, expectedError)
 	t.end();
 })
 
 //////////////////////////////////////////////////
 
-async function runTest(t, validateA1, createaA2, expectedError, adressType, adress) {
+async function runTest(t, validateA1, createaA2, adressType, adress) {
 	let [mockSocket, testSocket] = misc.createMockSocket()
     testSocket.setState(mockSocket.OPEN)
 	let [a2, expectedProtCount] = createaA2()
@@ -149,7 +148,6 @@ async function runTest(t, validateA1, createaA2, expectedError, adressType, adre
     }()
 
 	let sc = saltChannelSession(mockSocket)
-	sc.setOnError(onError(t, expectedError))
 	sc.setOnClose(doNothing)
 
 	let prots = await sc.a1a2(adressType, adress)
@@ -400,11 +398,4 @@ function validateA2Response(t, prots, expectedProtCount) {
 			t.equal(prot.p2.length, 10, 'Check prot '+index+' p2 length')
 		}
     }
-}
-
-function onError(t, expectedErr) {
-	return function (err){
-		t.equal(err.message, expectedErr, 'Check error')
-
-	}
 }

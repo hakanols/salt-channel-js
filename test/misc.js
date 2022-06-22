@@ -48,14 +48,3 @@ export function createMockSocket(){
 
 	return [ mockSocketInterface, testInterface ]
 }
-
-
-export function createErrorWaiter(sc){
-    let errorQueue = util.waitQueue();
-    sc.setOnError(function(err) {
-        errorQueue.push(err.message);
-    })
-    return async function(waitTime){
-        return (await errorQueue.pull(waitTime))[0];
-    }
-}
