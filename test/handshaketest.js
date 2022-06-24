@@ -99,9 +99,9 @@ test('receiveAppPacket', async function (t) {
     let encrypted = encrypt(testInterface.serverData, appPacket)
     testInterface.send(encrypted)
 
-    let message = await channel.receive(1000)
-    t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
-    t.arrayEqual(new Uint8Array(message), new Uint8Array(1), 'Unexpected data')
+    let event = await channel.receive(1000)
+    t.ok((event.message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
+    t.arrayEqual(new Uint8Array(event.message), new Uint8Array(1), 'Unexpected data')
 
 	t.end();
 });
@@ -143,14 +143,14 @@ test('receiveMultiAppPacket', async function (t) {
     let encrypted = encrypt(testInterface.serverData, multiAppPacket)
     testInterface.send(encrypted)
 
-    let multiApp1 = await channel.receive(1000)
-    let multiApp2 = await channel.receive(1000)
+    let event1 = await channel.receive(1000)
+    let event2 = await channel.receive(1000)
 
-    t.ok((multiApp1 instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
-    t.arrayEqual(new Uint8Array(multiApp1), new Uint8Array([0]), 'Unexpected data')
+    t.ok((event1.message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
+    t.arrayEqual(new Uint8Array(event1.message), new Uint8Array([0]), 'Unexpected data')
 
-    t.ok((multiApp2 instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
-    t.arrayEqual(new Uint8Array(multiApp2), new Uint8Array([1]), 'Unexpected data')
+    t.ok((event2.message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
+    t.arrayEqual(new Uint8Array(event2.message), new Uint8Array([1]), 'Unexpected data')
 
 	t.end();
 });
@@ -240,9 +240,9 @@ test('receiveLastFlag', async function (t) {
     let encrypted = encrypt(testInterface.serverData, appPacket, true)
     testInterface.send(encrypted)
 
-    let message = await channel.receive(1000)
-    t.ok((message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
-    t.arrayEqual(new Uint8Array(message), new Uint8Array(1), 'Expected 1 zero byte, was ' + util.ab2hex(message));
+    let event = await channel.receive(1000)
+    t.ok((event.message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
+    t.arrayEqual(new Uint8Array(event.message), new Uint8Array(1), 'Expected 1 zero byte, was ' + util.ab2hex(event.message));
 
     console.log('## stateAfterReceivedLastFlag')
     t.equal(channel.getState(), 'closed', 'State not closed')

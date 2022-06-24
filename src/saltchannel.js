@@ -113,16 +113,20 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	async function receive(waitTime){
 		let message = messageQueue.shift();
-		if (message != undefined){
-			return message
+		if (message == undefined){
+			let data = await Promise.race([
+				receiveData(waitTime), 
+				closeTrigger.waiter(waitTime+1000)
+			])
+			if (data != null){
+				onmsg(data)
+				message = messageQueue.shift()
+			}
 		}
-
-		let data = await Promise.race([receiveData(waitTime), closeTrigger.waiter(waitTime+1000)])
-		if (data != null){
-			onmsg(data)
-			return messageQueue.shift()
+		return {
+			message: message,
+			close: saltState == STATE_CLOSED
 		}
-		return null
 	}
 
 	// =========== A1A2 MESSAGE EXCHANGE ================
