@@ -40,27 +40,23 @@ const session4AppBytes = util.hex2ab('06005089769da0def9f37289f9e5ff6e78710b9747
 const session4EchoBytes = util.hex2ab('068082eb9d3660b82984f3c1c1051f8751ab5585b7d0ad354d9b5c56f755')
 
 
-let clientSecret =
-	util.hex2ab('55f4d1d198093c84de9ee9a6299e0f6891c2e1d0b369efb592a9e3f169fb0f79' +
-						'5529ce8ccf68c0b8ac19d437ab0f5b32723782608e93c6264f184ba152c2357b')
-let clientSigKeyPair = nacl.sign.keyPair.fromSecretKey(clientSecret)
-let clientEphKeyPair = {
+const clientSecret = util.hex2ab('55f4d1d198093c84de9ee9a6299e0f6891c2e1d0b369efb592a9e3f169fb0f79' +
+						         '5529ce8ccf68c0b8ac19d437ab0f5b32723782608e93c6264f184ba152c2357b')
+const clientSigKeyPair = nacl.sign.keyPair.fromSecretKey(clientSecret)
+const clientEphKeyPair = {
 	publicKey: util.hex2ab('8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a'),
 	secretKey: util.hex2ab('77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a')
-	}
+}
 
-let serverSecret =
-	util.hex2ab('7a772fa9014b423300076a2ff646463952f141e2aa8d98263c690c0d72eed52d' +
-						'07e28d4ee32bfdc4b07d41c92193c0c25ee6b3094c6296f373413b373d36168b')
-let serverSigKeyPair = nacl.sign.keyPair.fromSecretKey(serverSecret)
-let serverEphKeyPair = {
+const serverSecret = util.hex2ab('7a772fa9014b423300076a2ff646463952f141e2aa8d98263c690c0d72eed52d' +
+						         '07e28d4ee32bfdc4b07d41c92193c0c25ee6b3094c6296f373413b373d36168b')
+const serverSigKeyPair = nacl.sign.keyPair.fromSecretKey(serverSecret)
+const serverEphKeyPair = {
 	publicKey: util.hex2ab('de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f'),
 	secretKey: util.hex2ab('5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb')
-	}
+}
 
-let sessionKey = util.hex2ab('1b27556473e985d462cd51197a9a46c76009549eac6474f206c4ee0844f68389')
-
-function doNothing() {}
+const sessionKey = util.hex2ab('1b27556473e985d462cd51197a9a46c76009549eac6474f206c4ee0844f68389')
 
 //////////////////////////////////////////////////////////
 

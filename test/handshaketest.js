@@ -38,14 +38,13 @@ const bigPayload = util.hex2ab('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' +
     '77777777777777777777777777777777777777778888888888888888888888888888888888888888' +
     '9999999999999999999999999999999999999999ffffffffffffffffffffffffffffffffffffffff')
 
-    const PacketTypeM1  = 1
-    const PacketTypeM2  = 2
-    const PacketTypeM3  = 3
-    const PacketTypeM4  = 4
-    const PacketTypeApp = 5
-    const PacketTypeEncrypted = 6
-    const PacketTypeMultiApp = 11
-
+const PacketTypeM1  = 1
+const PacketTypeM2  = 2
+const PacketTypeM3  = 3
+const PacketTypeM4  = 4
+const PacketTypeApp = 5
+const PacketTypeEncrypted = 6
+const PacketTypeMultiApp = 11
 
 //////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -102,6 +101,7 @@ test('receiveAppPacket', async function (t) {
     let event = await channel.receive(1000)
     t.ok((event.message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
     t.arrayEqual(new Uint8Array(event.message), new Uint8Array(1), 'Unexpected data')
+    t.notOk(event.close,'Expected open');
 
 	t.end();
 });
@@ -148,9 +148,11 @@ test('receiveMultiAppPacket', async function (t) {
 
     t.ok((event1.message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
     t.arrayEqual(new Uint8Array(event1.message), new Uint8Array([0]), 'Unexpected data')
+    t.notOk(event1.close,'Expected open');
 
     t.ok((event2.message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
     t.arrayEqual(new Uint8Array(event2.message), new Uint8Array([1]), 'Unexpected data')
+    t.notOk(event2.close,'Expected open');
 
 	t.end();
 });
@@ -243,6 +245,7 @@ test('receiveLastFlag', async function (t) {
     let event = await channel.receive(1000)
     t.ok((event.message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
     t.arrayEqual(new Uint8Array(event.message), new Uint8Array(1), 'Expected 1 zero byte, was ' + util.ab2hex(event.message));
+    t.ok(event.close,'Expected closed');
 
     console.log('## stateAfterReceivedLastFlag')
     t.equal(channel.getState(), 'closed', 'State not closed')
