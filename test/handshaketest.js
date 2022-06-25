@@ -676,15 +676,11 @@ function validateM4(t, serverData, message, threshold) {
     }
 
     let clientSigKey = m4.slice(6,38)
-
     t.arrayEqual(clientSigKey, clientSigKeyPair.publicKey, 'M4: Client signing key does not match expected')
 
     let signature = m4.slice(38,102)
-
     let concat = new Uint8Array([...sigBytes2, ...serverData.m1Hash, ...serverData.m2Hash])
-
     let success = nacl.sign.detached.verify(concat, signature, clientSigKey)
-
     t.ok(success, 'M4: Could not verify signature')
 }
 

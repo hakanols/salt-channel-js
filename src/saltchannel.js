@@ -27,6 +27,16 @@ export default function(ws, timeKeeper, timeChecker) {
 	const ADDR_TYPE_ANY = 0
 	const ADDR_TYPE_PUB = 1
 
+	const PacketTypeM1  = 1
+	const PacketTypeM2  = 2
+	const PacketTypeM3  = 3
+	const PacketTypeM4  = 4
+	const PacketTypeApp = 5
+	const PacketTypeA1  = 8
+	const PacketTypeA2  = 9
+	const PacketTypeEncrypted = 6
+	const PacketTypeMultiApp = 11
+
 	const WS_CONNECTING = 0
 	const WS_OPEN = 1
 	const WS_CLOSING = 2
