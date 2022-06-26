@@ -173,55 +173,52 @@ export default function(ws, timeKeeper, timeChecker) {
     function handleA2(message) {
     	if (saltState !== STATE_A1A2) {
     		closeAndThrow('A2: Invalid internal state: ' + saltState)
-    		return
     	}
         let a2 = new Uint8Array(message)
 
-        if (validHeader(a2, 9, 129)) {
-        	closeAndThrow('A2: NoSuchServer exception')
-        	return
+        if (a2[0] != PacketTypeA2) {
+			closeAndThrow('A2: Bad packet header. Message type was: '+a2[0])
         }
-        if (!validHeader(a2, 9, 128)) {
-        	closeAndThrow('A2: Bad packet header. Expected 9 128, was ' +
-        		a2[0] + ' ' + a2[1])
-        	return
+		if (a2[1] != 128) {
+			if (a2[1] == 129) {
+				closeAndThrow('A2: NoSuchServer exception')
+			}
+			else {
+				closeAndThrow('A2: Bad packet header. Message info was: '+a2[1])
+			}	
         }
-        let offset = 2
-        let count = a2[offset++]
+
+        let count = a2[2]
 
         if (count < 1 || count > 127) {
             closeAndThrow('A2: Count must be in range [1, 127], was: ' + count)
-            return
         }
 
         if (a2.length !== count*20 + 3) {
             closeAndThrow('A2: Expected packet length ' + (count*20 + 3) +
             	' was ' + a2.length)
-            return
         }
 
         let prots = []
         for (let i = 0; i < count; i++) {
-        	let p1 = ''
-        	let p2 = ''
+        	let p1 = a2.slice(i*20+3,i*20+13)
+        	let p2 = a2.slice(i*20+13,i*20+23)
 
-        	for (let j = 0; j < 10; j++) {
-        		if (!validPStringChar(a2[offset])) {
-        			closeAndThrow('A2: Invalid char in p1 "' +
-        				String.fromCharCode(a2[offset]) + '"')
-        			return
-        		}
-        		if (!validPStringChar(a2[offset + 10])) {
-        			closeAndThrow('A2: Invalid char in p2 "' +
-        				String.fromCharCode(a2[offset + 10]) + '"')
-        			return
-        		}
-        		p1 += String.fromCharCode(a2[offset])
-        		p2 += String.fromCharCode(a2[offset + 10])
-        		offset++
-        	}
+			for (let byte of p1){
+				if (!validPStringChar(byte)) {
+					closeAndThrow('A2: Invalid char in p1 "' + byte + '"')
+				}
+			}
+			for (let byte of p2){
+				if (!validPStringChar(byte)) {
+					closeAndThrow('A2: Invalid char in p2 "' + byte + '"')
+				}
+			}
 
-            prots[i] = {p1: p1, p2: p2}
+            prots[i] = {
+				p1: String.fromCharCode(...p1),
+				p2: String.fromCharCode(...p2)
+			}
         }
 
         saltState = STATE_LAST
