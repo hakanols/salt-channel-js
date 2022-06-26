@@ -81,14 +81,14 @@ test('badPacketHeader2', async function (t) {
 })
 
 test('addressPub', async function (t) {
-    await runTest(t, validateA1Pub, create1Prot, 1, serverSigKeyPair.publicKey)
+    await runTest(t, validateA1Pub, create1Prot, serverSigKeyPair.publicKey)
 	t.end();
 })
 
 test('noSuchServer', async function (t) {
 	const expectedError  = 'A2: NoSuchServer exception'
 	t.throws(async function(){
-		await runTest(t, validateA1ZeroPub, createNoSuchServer, 1, new Uint8Array(32))
+		await runTest(t, validateA1ZeroPub, createNoSuchServer, new Uint8Array(32))
 	}, expectedError)
 	t.end();
 })
@@ -96,7 +96,7 @@ test('noSuchServer', async function (t) {
 test('badAdressType', async function (t) {
 	const expectedError  = 'A1A2: Unsupported adress type: 2'
 	t.throws(async function(){
-		await runTest(t, doNothing, doNothing, 2, null)
+		await runTest(t, doNothing, doNothing, null)
 	}, expectedError)
 	t.end();
 })
@@ -135,7 +135,7 @@ test('badCount2', async function (t) {
 
 //////////////////////////////////////////////////
 
-async function runTest(t, validateA1, createaA2, adressType, adress) {
+async function runTest(t, validateA1, createaA2, adress) {
 	let [mockSocket, testSocket] = misc.createMockSocket()
     testSocket.setState(mockSocket.OPEN)
 	let [a2, expectedProtCount] = createaA2()
@@ -148,7 +148,7 @@ async function runTest(t, validateA1, createaA2, adressType, adress) {
 
 	let sc = saltChannelSession(mockSocket)
 
-	let prots = await sc.a1a2(adressType, adress)
+	let prots = await sc.a1a2(adress)
 	validateA2Response(t, prots, expectedProtCount)
 
 	await serverPromise;

@@ -17,7 +17,6 @@ const request = util.hex2ab('010505050505')
 const session2A1Bytes = util.hex2ab('08000120000808080808080808080808080808080808080808080808080808080808080808')
 const session2A2Bytes = util.hex2ab('098001534376322d2d2d2d2d2d4543484f2d2d2d2d2d2d')
 const adress = util.hex2ab('0808080808080808080808080808080808080808080808080808080808080808')
-const adressType = 1
 const p1 = 'SCv2------'
 const p2 = 'ECHO------'
 
@@ -99,7 +98,7 @@ test('session2', async function (t) {
 
 	let sc = saltChannelSession(mockSocket)
 
-	let prots = await sc.a1a2(adressType, adress)
+	let prots = await sc.a1a2(adress)
 	t.equal(prots.length, 1, 'Check prots length')
 	t.arrayEqual(prots[0].p1, p1, 'Check p1')
 	t.arrayEqual(prots[0].p2, p2, 'Check p2')

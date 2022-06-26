@@ -140,50 +140,34 @@ export default function(ws, timeKeeper, timeChecker) {
 	}
 
 	// =========== A1A2 MESSAGE EXCHANGE ================
-	async function a1a2(adressType, adress) {
+	async function a1a2(adress) {
 		if (saltState !== STATE_INIT) {
 			throw new Error('A1A2: Invalid internal state: ' + saltState)
         }
 		saltState = STATE_A1A2
 
-		let a1 = createA1(adressType, adress)
+		let a1 = createA1(adress)
         ws.send(a1)
 		let a2 = await receiveData(1000)
 		let prots = handleA2(a2)
 		return prots
     }
 
-    function createA1(adressType = ADDR_TYPE_ANY, adress) {
-    	switch (adressType) {
-    		case ADDR_TYPE_ANY:
-    			return getA1Any()
+    function createA1(address) {
+		let header = new Uint8Array([PacketTypeA1, 0])
+		let type = (address == null ? ADDR_TYPE_ANY : ADDR_TYPE_PUB)
+		if (address == null) {
+			address = new Uint8Array([])
+		}
+		let count = new Uint8Array( (new Int16Array([address.length])).buffer)
 
-    		case ADDR_TYPE_PUB:
-    			return getA1Pub(adress)
+		let packet = new Uint8Array([
+			...header, 
+			type,
+			...count,
+			...address])
 
-    		default:
-    			throw new RangeError('A1A2: Unsupported adress type: ' + adressType)
-    	}
-    }
-
-    function getA1Any() {
-    	let a1 = new Uint8Array(5)
-    	a1[0] = 8
-    	return a1
-    }
-
-    function getA1Pub(adress) {
-    	if (adress instanceof ArrayBuffer) {
-    		adress = new Uint8Array(adress)
-    	} else if (!(adress instanceof Uint8Array)) {
-    		throw new TypeError('A1A2: Expected adress to be ArrayBuffer or Uint8Array')
-    	}
-		let a1 = new Uint8Array(5 + adress.length)
-        a1[0] = 8
-        a1[2] = ADDR_TYPE_PUB
-        setUint16(a1, adress.length, 3)
-        a1.set(adress, 5)
-        return a1
+    	return packet
     }
 
     function handleA2(message) {
