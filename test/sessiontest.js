@@ -40,7 +40,7 @@ const session4EchoBytes = util.hex2ab('068082eb9d3660b82984f3c1c1051f8751ab5585b
 
 
 const clientSecret = util.hex2ab('55f4d1d198093c84de9ee9a6299e0f6891c2e1d0b369efb592a9e3f169fb0f79' +
-						         '5529ce8ccf68c0b8ac19d437ab0f5b32723782608e93c6264f184ba152c2357b')
+								 '5529ce8ccf68c0b8ac19d437ab0f5b32723782608e93c6264f184ba152c2357b')
 const clientSigKeyPair = nacl.sign.keyPair.fromSecretKey(clientSecret)
 const clientEphKeyPair = {
 	publicKey: util.hex2ab('8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a'),
@@ -48,7 +48,7 @@ const clientEphKeyPair = {
 }
 
 const serverSecret = util.hex2ab('7a772fa9014b423300076a2ff646463952f141e2aa8d98263c690c0d72eed52d' +
-						         '07e28d4ee32bfdc4b07d41c92193c0c25ee6b3094c6296f373413b373d36168b')
+								 '07e28d4ee32bfdc4b07d41c92193c0c25ee6b3094c6296f373413b373d36168b')
 const serverSigKeyPair = nacl.sign.keyPair.fromSecretKey(serverSecret)
 const serverEphKeyPair = {
 	publicKey: util.hex2ab('de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f'),
@@ -61,19 +61,19 @@ const sessionKey = util.hex2ab('1b27556473e985d462cd51197a9a46c76009549eac6474f2
 
 test('session1', async function (t) {
 	let [mockSocket, testSocket] = misc.createMockSocket()
-    testSocket.setState(mockSocket.OPEN)
+	testSocket.setState(mockSocket.OPEN)
 
-    let serverPromise = async function(){
-        let m1 = await testSocket.receive(1000)
+	let serverPromise = async function(){
+		let m1 = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(m1), session1M1Bytes, 'Check M1')
-        testSocket.send(session1M2Bytes)
-        testSocket.send(session1M3Bytes)
+		testSocket.send(session1M2Bytes)
+		testSocket.send(session1M3Bytes)
 		let m4 = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(m4), session1M4Bytes, 'Check M4')
 		let app = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(app), session1AppBytes, 'Check App')
-        testSocket.send(session1EchoBytes)
-    }()
+		testSocket.send(session1EchoBytes)
+	}()
 
 	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
 
@@ -88,13 +88,13 @@ test('session1', async function (t) {
 
 test('session2', async function (t) {
 	let [mockSocket, testSocket] = misc.createMockSocket()
-    testSocket.setState(mockSocket.OPEN)
+	testSocket.setState(mockSocket.OPEN)
 
-    let serverPromise = async function(){
-        let a1 = await testSocket.receive(1000)
+	let serverPromise = async function(){
+		let a1 = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(a1), session2A1Bytes, 'Check A1')
-        testSocket.send(session2A2Bytes)
-    }()
+		testSocket.send(session2A2Bytes)
+	}()
 
 	let sc = saltChannelSession(mockSocket)
 
@@ -109,7 +109,7 @@ test('session2', async function (t) {
 
 test('session3', async function (t) {
 	let [mockSocket, testSocket] = misc.createMockSocket()
-    testSocket.setState(mockSocket.OPEN)
+	testSocket.setState(mockSocket.OPEN)
 
 	let time = 0;
 	function getTime() {
@@ -121,20 +121,20 @@ test('session3', async function (t) {
 		return time
 	}
 
-    let serverPromise = async function(){
-        let m1 = await testSocket.receive(1000)
+	let serverPromise = async function(){
+		let m1 = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(m1), session3M1Bytes, 'Check M1')
-        testSocket.send(session3M2Bytes)
-        testSocket.send(session3M3Bytes)
+		testSocket.send(session3M2Bytes)
+		testSocket.send(session3M3Bytes)
 		let m4 = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(m4), session3M4Bytes, 'Check M4')
 		let app = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(app), session3App1Bytes, 'Check App')
-        testSocket.send(session3Echo1Bytes)
+		testSocket.send(session3Echo1Bytes)
 		let multi = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(multi), session3MultiBytes, 'Check App')
-        testSocket.send(session3Echo2Bytes)
-    }()
+		testSocket.send(session3Echo2Bytes)
+	}()
 
 	let sc = saltChannelSession(mockSocket, getTimeKeeper(getTime))
 
@@ -154,19 +154,19 @@ test('session3', async function (t) {
 
 test('session4', async function (t) {
 	let [mockSocket, testSocket] = misc.createMockSocket()
-    testSocket.setState(mockSocket.OPEN)
+	testSocket.setState(mockSocket.OPEN)
 
-    let serverPromise = async function(){
-        let m1 = await testSocket.receive(1000)
+	let serverPromise = async function(){
+		let m1 = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(m1), session4M1Bytes, 'Check M1')
-        testSocket.send(session4M2Bytes)
-        testSocket.send(session4M3Bytes)
+		testSocket.send(session4M2Bytes)
+		testSocket.send(session4M3Bytes)
 		let m4 = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(m4), session4M4Bytes, 'Check M4')
 		let app = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(app), session4AppBytes, 'Check App')
-        testSocket.send(session4EchoBytes)
-    }()
+		testSocket.send(session4EchoBytes)
+	}()
 
 	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
 

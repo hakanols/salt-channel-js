@@ -17,12 +17,12 @@ const LastFlag = 128
 //////////////////////////////////////////////////
 
 test('oneProt', async function (t) {
-    let sc = await runTest(t, validateA1Any, create1Prot)
+	let sc = await runTest(t, validateA1Any, create1Prot)
 	t.end();
 })
 
 test('twoProts', async function (t) {
-    await runTest(t, validateA1Any, create2Prots)
+	await runTest(t, validateA1Any, create2Prots)
 	t.end();
 })
 
@@ -33,21 +33,21 @@ test('maxProts', async function (t) {
 test('nonInit', async function (t) {
 	const  expectedError = 'A1A2: Invalid internal state: a1a2'
 	let [mockSocket, testSocket] = misc.createMockSocket()
-    testSocket.setState(mockSocket.OPEN)
+	testSocket.setState(mockSocket.OPEN)
 	let[a2, expectedProtCount] = create1Prot()
 
-    let serverPromise = async function(){
-        await util.sleep(500)
-        testSocket.send(a2)
-    }()
+	let serverPromise = async function(){
+		await util.sleep(500)
+		testSocket.send(a2)
+	}()
 
 	let sc = saltChannelSession(mockSocket)
 
 	let a1a2Promise = sc.a1a2()
 
-    t.throws(async function(){
-        await sc.a1a2()
-    }, expectedError)
+	t.throws(async function(){
+		await sc.a1a2()
+	}, expectedError)
 
 	let prots = await a1a2Promise;
 	validateA2Response(t, prots, expectedProtCount)
@@ -59,7 +59,7 @@ test('nonInit', async function (t) {
 test('badPacketLength', async function (t) {
 	const expectedError = 'A2: Expected packet length 23 was 43'
 	t.throws(async function(){
-    	await runTest(t, validateA1Any, createBadPacketLength)
+		await runTest(t, validateA1Any, createBadPacketLength)
 	}, expectedError)
 	t.end();
 })
@@ -81,7 +81,7 @@ test('badPacketHeader2', async function (t) {
 })
 
 test('addressPub', async function (t) {
-    await runTest(t, validateA1Pub, create1Prot, serverSigKeyPair.publicKey)
+	await runTest(t, validateA1Pub, create1Prot, serverSigKeyPair.publicKey)
 	t.end();
 })
 
@@ -137,14 +137,14 @@ test('badCount2', async function (t) {
 
 async function runTest(t, validateA1, createaA2, adress) {
 	let [mockSocket, testSocket] = misc.createMockSocket()
-    testSocket.setState(mockSocket.OPEN)
+	testSocket.setState(mockSocket.OPEN)
 	let [a2, expectedProtCount] = createaA2()
 
-    let serverPromise = async function(){
-        let a1 = await testSocket.receive(1000)
-        validateA1(t, a1)
-        testSocket.send(a2)
-    }()
+	let serverPromise = async function(){
+		let a1 = await testSocket.receive(1000)
+		validateA1(t, a1)
+		testSocket.send(a2)
+	}()
 
 	let sc = saltChannelSession(mockSocket)
 
@@ -395,5 +395,5 @@ function validateA2Response(t, prots, expectedProtCount) {
 		if (prot.p2.length !== 10) {
 			t.equal(prot.p2.length, 10, 'Check prot '+index+' p2 length')
 		}
-    }
+	}
 }

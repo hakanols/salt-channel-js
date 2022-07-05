@@ -115,17 +115,17 @@ export default function(ws, timeKeeper, timeChecker) {
 	async function a1a2(adress) {
 		if (saltState !== STATE_INIT) {
 			throw new Error('A1A2: Invalid internal state: ' + saltState)
-        }
+		}
 		saltState = STATE_A1A2
 
 		let a1 = createA1(adress)
-        sendOnWs(a1)
+		sendOnWs(a1)
 		let a2 = await receiveData(1000)
 		let prots = handleA2(a2)
 		return prots
-    }
+	}
 
-    function createA1(address) {
+	function createA1(address) {
 		let header = new Uint8Array([PacketTypeA1, 0])
 		let type = (address == null ? ADDR_TYPE_ANY : ADDR_TYPE_PUB)
 		if (address == null) {
@@ -139,17 +139,17 @@ export default function(ws, timeKeeper, timeChecker) {
 			...count,
 			...address])
 
-    	return packet
-    }
+		return packet
+	}
 
-    function handleA2(a2) {
-    	if (saltState !== STATE_A1A2) {
-    		closeAndThrow('A2: Invalid internal state: ' + saltState)
-    	}
+	function handleA2(a2) {
+		if (saltState !== STATE_A1A2) {
+			closeAndThrow('A2: Invalid internal state: ' + saltState)
+		}
 
-        if (a2[0] != PacketTypeA2) {
+		if (a2[0] != PacketTypeA2) {
 			closeAndThrow('A2: Bad packet header. Message type was: '+a2[0])
-        }
+		}
 		if (a2[1] != 128) {
 			if (a2[1] == 129) {
 				closeAndThrow('A2: NoSuchServer exception')
@@ -157,23 +157,23 @@ export default function(ws, timeKeeper, timeChecker) {
 			else {
 				closeAndThrow('A2: Bad packet header. Message info was: '+a2[1])
 			}	
-        }
+		}
 
-        let count = a2[2]
+		let count = a2[2]
 
-        if (count < 1 || count > 127) {
-            closeAndThrow('A2: Count must be in range [1, 127], was: ' + count)
-        }
+		if (count < 1 || count > 127) {
+			closeAndThrow('A2: Count must be in range [1, 127], was: ' + count)
+		}
 
-        if (a2.length !== count*20 + 3) {
-            closeAndThrow('A2: Expected packet length ' + (count*20 + 3) +
-            	' was ' + a2.length)
-        }
+		if (a2.length !== count*20 + 3) {
+			closeAndThrow('A2: Expected packet length ' + (count*20 + 3) +
+				' was ' + a2.length)
+		}
 
-        let prots = []
-        for (let i = 0; i < count; i++) {
-        	let p1 = a2.slice(i*20+3,i*20+13)
-        	let p2 = a2.slice(i*20+13,i*20+23)
+		let prots = []
+		for (let i = 0; i < count; i++) {
+			let p1 = a2.slice(i*20+3,i*20+13)
+			let p2 = a2.slice(i*20+13,i*20+23)
 
 			for (let byte of p1){
 				if (!validPStringChar(byte)) {
@@ -186,41 +186,41 @@ export default function(ws, timeKeeper, timeChecker) {
 				}
 			}
 
-            prots[i] = {
+			prots[i] = {
 				p1: String.fromCharCode(...p1),
 				p2: String.fromCharCode(...p2)
 			}
-        }
+		}
 
-        saltState = STATE_LAST
+		saltState = STATE_LAST
 
-        close() // ToDo Should this be here?
+		close() // ToDo Should this be here?
 
 		return prots
-    }
+	}
 
-    function validPStringChar(byteValue) {
-    	// '-' to '9' in ASCII
-    	if (byteValue >= 45 && byteValue <= 57) {
-    		return true
-    	}
-    	// 'A' to 'Z' in ASCII
-    	if (byteValue >= 65 && byteValue <= 90) {
-    		return true
-    	}
-    	// '_' in ASCII
-    	if (byteValue === 95) {
-    		return true
-    	}
-    	// 'a' to 'z' in ASCII
-    	if (byteValue >= 97 && byteValue <= 122) {
-    		return true
-    	}
+	function validPStringChar(byteValue) {
+		// '-' to '9' in ASCII
+		if (byteValue >= 45 && byteValue <= 57) {
+			return true
+		}
+		// 'A' to 'Z' in ASCII
+		if (byteValue >= 65 && byteValue <= 90) {
+			return true
+		}
+		// '_' in ASCII
+		if (byteValue === 95) {
+			return true
+		}
+		// 'a' to 'z' in ASCII
+		if (byteValue >= 97 && byteValue <= 122) {
+			return true
+		}
 
-    	return false
-    }
+		return false
+	}
 
-    // =================================================
+	// =================================================
 
 	// =============== HANDSHAKE BEGIN =================
 
@@ -323,8 +323,8 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	function handleM2(m2) {
 		if (saltState !== STATE_HAND) {
-    		closeAndThrow('M2: Invalid internal state: ' + saltState)
-    	}
+			closeAndThrow('M2: Invalid internal state: ' + saltState)
+		}
 
 		// Header
 		if (validHeader(m2, PacketTypeM2, 0)) {
@@ -350,8 +350,8 @@ export default function(ws, timeKeeper, timeChecker) {
 
 	function handleM3(data, hostPub, m1Hash, m2Hash) {
 		if (saltState !== STATE_HAND) {
-    		closeAndThrow('M3: Invalid internal state: ' + saltState)
-    	}
+			closeAndThrow('M3: Invalid internal state: ' + saltState)
+		}
 
 		let m3 = decrypt(data)
 		if (!m3) {
