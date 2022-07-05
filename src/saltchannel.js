@@ -14,6 +14,9 @@ export default function(ws, timeKeeper, timeChecker) {
 	const SIG_STR_1 = 'SC-SIG01'
 	const SIG_STR_2 = 'SC-SIG02'
 	const VERSION_STR = 'SCv2'
+	const SIG_STR1_BYTES = [...SIG_STR_1].map(letter=>letter.charCodeAt(0))
+	const SIG_STR2_BYTES = [...SIG_STR_2].map(letter=>letter.charCodeAt(0))
+	const VERSION = [...VERSION_STR].map(letter=>letter.charCodeAt(0))
 
 	const STATE_INIT = 'init'
 	const STATE_A1A2 = 'a1a2'
@@ -42,39 +45,9 @@ export default function(ws, timeKeeper, timeChecker) {
 	const WS_CLOSING = 2
 	const WS_CLOSED = 3
 
-	const SIG_STR1_BYTES = new Uint8Array([ SIG_STR_1.charCodeAt(0)
-							, SIG_STR_1.charCodeAt(1)
-							, SIG_STR_1.charCodeAt(2)
-							, SIG_STR_1.charCodeAt(3)
-							, SIG_STR_1.charCodeAt(4)
-							, SIG_STR_1.charCodeAt(5)
-							, SIG_STR_1.charCodeAt(6)
-							, SIG_STR_1.charCodeAt(7) ])
-
-	const SIG_STR2_BYTES = new Uint8Array([ SIG_STR_2.charCodeAt(0)
-							, SIG_STR_2.charCodeAt(1)
-							, SIG_STR_2.charCodeAt(2)
-							, SIG_STR_2.charCodeAt(3)
-							, SIG_STR_2.charCodeAt(4)
-							, SIG_STR_2.charCodeAt(5)
-							, SIG_STR_2.charCodeAt(6)
-							, SIG_STR_2.charCodeAt(7) ])
-
-	const VERSION = new Uint8Array([ VERSION_STR.charCodeAt(0)
-							, VERSION_STR.charCodeAt(1)
-							, VERSION_STR.charCodeAt(2)
-							, VERSION_STR.charCodeAt(3) ])
-
-
-
 	let eNonce
 	let dNonce
-	let m1Hash
-	let m2Hash
 	let sessionKey
-	let hostPub
-	let signKeyPair
-	let ephemeralKeyPair
 	let receiveQueue = util.waitQueue();
 	let messageQueue = [];
 	let closeTrigger = util.triggWaiter()
@@ -88,12 +61,7 @@ export default function(ws, timeKeeper, timeChecker) {
 	function close() {
 		eNonce = undefined
 		dNonce = undefined
-		m1Hash = undefined
-		m2Hash = undefined
 		sessionKey = undefined
-		hostPub = undefined
-		signKeyPair = undefined
-		ephemeralKeyPair = undefined
 
 		saltState = STATE_CLOSED
 
@@ -129,12 +97,12 @@ export default function(ws, timeKeeper, timeChecker) {
 				closeTrigger.waiter(waitTime+1000)
 			])
 			if (data != null){
-				onmsg(data)
+				handleMessage(data)
 				message = messageQueue.shift()
 			}
 		}
 		return {
-			message: message,
+			message: message.buffer,
 			close: saltState == STATE_CLOSED
 		}
 	}
@@ -147,7 +115,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		saltState = STATE_A1A2
 
 		let a1 = createA1(adress)
-        ws.send(a1)
+        sendOnWs(a1)
 		let a2 = await receiveData(1000)
 		let prots = handleA2(a2)
 		return prots
@@ -170,11 +138,10 @@ export default function(ws, timeKeeper, timeChecker) {
     	return packet
     }
 
-    function handleA2(message) {
+    function handleA2(a2) {
     	if (saltState !== STATE_A1A2) {
     		closeAndThrow('A2: Invalid internal state: ' + saltState)
     	}
-        let a2 = new Uint8Array(message)
 
         if (a2[0] != PacketTypeA2) {
 			closeAndThrow('A2: Bad packet header. Message type was: '+a2[0])
@@ -260,17 +227,21 @@ export default function(ws, timeKeeper, timeChecker) {
 		if (saltState !== STATE_INIT) {
 			closeAndThrow('Handshake: Invalid internal state: ' + saltState)
 		}
-		signKeyPair = sigKeyPair
-		ephemeralKeyPair = ephKeyPair
-		hostPub = hostSigPub
 		saltState = STATE_HAND
 
-		sendM1()
+		let m1 = createM1(ephKeyPair.publicKey, hostSigPub)
+		sendOnWs(m1)
 		let m2 = await receiveData(1000)
-		handleM2(m2)
+		let serverPub = handleM2(m2)
+
+		sessionKey = nacl.box.before(serverPub, ephKeyPair.secretKey)
+		let m1Hash = nacl.hash(m1)
+		let m2Hash = nacl.hash(m2)
+
 		let m3 = await receiveData(1000)
-		handleM3(m3)
-		sendM4()
+		handleM3(m3, hostSigPub, m1Hash, m2Hash)
+		let m4 = createM4(sigKeyPair, m1Hash, m2Hash)
+		sendOnWs(m4)
 		
 		saltState = STATE_READY
 
@@ -328,7 +299,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		}
 	}
 
-	function sendM1() {
+	function createM1(ephPublicKey, hostPub) {
 		let m1Len = (hostPub) ? 74 : 42
 		let m1 = new Uint8Array(m1Len)
 
@@ -342,15 +313,14 @@ export default function(ws, timeKeeper, timeChecker) {
 		setInt32(m1, timeKeeper.getTime(), 6)
 
 		// ClientEncKey
-		m1.set(ephemeralKeyPair.publicKey, 10)
+		m1.set(ephPublicKey, 10)
 
 		// ServerSigKey
 		if (hostPub) {
 			m1.set(hostPub, 42)
 		}
-		m1Hash = nacl.hash(m1)
 
-		sendOnWs(m1.buffer)
+		return m1
 	}
 
 	function handleM2(m2) {
@@ -377,19 +347,15 @@ export default function(ws, timeKeeper, timeChecker) {
 		}
 
 		let serverPub = getUints(m2, 32, 6)
-
-		sessionKey = nacl.box.before(serverPub, ephemeralKeyPair.secretKey)
-
-		m2Hash = nacl.hash(m2)
+		return serverPub
 	}
 
-	function handleM3(data) {
+	function handleM3(data, hostPub, m1Hash, m2Hash) {
 		if (saltState !== STATE_HAND) {
     		closeAndThrow('M3: Invalid internal state: ' + saltState)
     	}
 
 		let m3 = decrypt(data)
-
 		if (!m3) {
 			closeAndThrow('EncryptedMessage: Could not decrypt message')
 		}
@@ -405,33 +371,23 @@ export default function(ws, timeKeeper, timeChecker) {
 			closeAndThrow('M3: Detected delayed packet')
 		}
 
-		let serverPub = getUints(m3, 32, 6)
-
+		let serverPub = m3.slice(6, 38)
 		if (hostPub) {
 			if (!util.uint8ArrayEquals(serverPub, hostPub)) {
 				closeAndThrow('M3: ServerSigKey does not match expected')
 			}
 		}
 
-		let signature = new Uint8Array(64)
-		for (let i = 0; i < 64; i++) {
-			signature[i] = m3[38+i]
-		}
-
-		// Construct the message that was signed
-		let concat = new Uint8Array(2*nacl.hash.hashLength + 8)
-		concat.set(SIG_STR1_BYTES)
-		concat.set(m1Hash, 8)
-		concat.set(m2Hash, 8 + nacl.hash.hashLength)
-
-		let success = nacl.sign.detached.verify(concat, signature, serverPub)
-
+		
+		let fingerprint = new Uint8Array([...SIG_STR1_BYTES, ...m1Hash, ...m2Hash])
+		let signature = m3.slice(38, 102)
+		let success = nacl.sign.detached.verify(fingerprint, signature, serverPub)
 		if (!success) {
 			closeAndThrow('M3: Could not verify signature')
 		}
 	}
 
-	function sendM4() {
+	function createM4(signKeyPair, m1Hash, m2Hash) {
 		// Create m4
 		let m4 = new Uint8Array(102)
 
@@ -440,12 +396,8 @@ export default function(ws, timeKeeper, timeChecker) {
 
 		m4.set(signKeyPair.publicKey, 6)
 
-		let concat = new Uint8Array(2*nacl.hash.hashLength + 8)
-		concat.set(SIG_STR2_BYTES)
-		concat.set(m1Hash, 8)
-		concat.set(m2Hash, 8 + nacl.hash.hashLength)
-		// We only send the signature, NOT the message
-		let signature = nacl.sign.detached(concat, signKeyPair.secretKey)
+		let fingerprint = new Uint8Array([...SIG_STR2_BYTES, ...m1Hash, ...m2Hash])
+		let signature = nacl.sign.detached(fingerprint, signKeyPair.secretKey)
 
 		m4.set(signature, 38)
 
@@ -453,7 +405,7 @@ export default function(ws, timeKeeper, timeChecker) {
 
 		let encrypted = encrypt(false, m4)
 
-		sendOnWs(encrypted.buffer)
+		return encrypted
 	}
 
 	// =================================================
@@ -470,16 +422,12 @@ export default function(ws, timeKeeper, timeChecker) {
 		}
 	}
 
-	function onmsg(data) {
+	function handleMessage(bytes) {
 		if (saltState !== STATE_READY) {
 			closeAndThrow('Received message when salt channel was not ready')
-			return
 		}
 
-		let bytes = new Uint8Array(data)
-
 		let clear = decrypt(bytes)
-
 		if (!clear) {
 			return
 		}
@@ -487,7 +435,6 @@ export default function(ws, timeKeeper, timeChecker) {
 		let time = getInt32(clear, 2)
 		if (timeChecker.delayed(time)) {
 			closeAndThrow('(Multi)AppPacket: Detected a delayed packet')
-			return
 		}
 
 		if (validHeader(clear, 5, 0)) {
@@ -497,7 +444,6 @@ export default function(ws, timeKeeper, timeChecker) {
 		} else {
 			closeAndThrow('(Multi)AppPacket: Bad packet header. ' +
 			'Expected 5 0 or 11 0, was ' + clear[0] + ' ' + clear[1])
-			return
 		}
 		if (saltState === STATE_LAST) {
 			close()
@@ -509,7 +455,6 @@ export default function(ws, timeKeeper, timeChecker) {
 
 		if (count === 0) {
 			closeAndThrow('MultiAppPacket: Zero application messages')
-			return
 		}
 
 		let offset = 2 + 4 + 2
@@ -520,21 +465,21 @@ export default function(ws, timeKeeper, timeChecker) {
 			let data = getUints(multiAppPacket, length, offset)
 			offset += length
 
-			messageQueue.push(data.buffer);
+			messageQueue.push(data);
 		}
 	}
 
 	function handleAppPacket(appPacket) {
 
 		let data = getUints(appPacket, appPacket.length - 6, 6)
-		messageQueue.push(data.buffer);
+		messageQueue.push(data);
 	}
 
 	function sendOnWs(message) {
-		if (message instanceof ArrayBuffer) {
-			ws.send(message)
+		if (message instanceof Uint8Array) {
+			ws.send(message.buffer)
 		} else {
-			throw new TypeError('Must only send ArrayBuffer on WebSocket')
+			throw new TypeError('Must only send Uint8Array on WebSocket')
 		}
 	}
 
@@ -547,7 +492,6 @@ export default function(ws, timeKeeper, timeChecker) {
 		} else {
 			closeAndThrow('EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was '
 				+ message[0] + ' ' + message[1])
-			return null
 		}
 
 		let bytes = new Uint8Array(message.byteLength - 2)
@@ -562,11 +506,8 @@ export default function(ws, timeKeeper, timeChecker) {
 
 		if (!clear) {
 			closeAndThrow('EncryptedMessage: Could not decrypt message')
-			return null
 		}
-		// clear.length < clear.buffer.byteLength
 		clear = new Uint8Array(clear)
-		// clear.length == clear.buffer.byteLength
 
 		return clear
 	}
@@ -663,7 +604,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		setInt32(appPacket, timeKeeper.getTime(), 2)
 
 		let encrypted = encrypt(last, appPacket)
-		sendOnWs(encrypted.buffer)
+		sendOnWs(encrypted)
 	}
 
 	function sendMultiAppPacket(last, arr) {
@@ -698,7 +639,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		setInt32(multiAppPacket, timeKeeper.getTime(), 2)
 
 		let encrypted = encrypt(last, multiAppPacket)
-		sendOnWs(encrypted.buffer)
+		sendOnWs(encrypted)
 	}
 
 	function writeMessage(multiAppPacket, uints, offset) {
