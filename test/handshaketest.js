@@ -414,10 +414,6 @@ test('receiveBadPubEph', async function (t) {
 // =================== SERVER SIDE HANDSHAKE CODE ===================
 // ============================ (sorta) =============================
 
-function doNothing() {
-    // Do nothing
-}
-
 function numberTo8Array(number){
     let array = new Int16Array([number])
     return new Uint8Array(array.buffer)
@@ -508,7 +504,8 @@ function createAppPacket(serverData, message) {
 
 function createMultiAppPacketBody(messages) {
     let packet = numberTo8Array(messages.length)
-    for (const message of messages){
+    for (let message of messages){
+        message = new Uint8Array(message)
         let size = numberTo8Array(message.length)
         packet= new Uint8Array([
             ...packet, 

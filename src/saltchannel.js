@@ -45,16 +45,13 @@ export default function(ws, timeKeeper, timeChecker) {
 	const WS_CLOSING = 2
 	const WS_CLOSED = 3
 
+	let saltState
 	let eNonce
 	let dNonce
 	let sessionKey
 	let receiveQueue = util.waitQueue();
 	let messageQueue = [];
 	let closeTrigger = util.triggWaiter()
-
-	timeKeeper = (timeKeeper) ? timeKeeper : getTimeKeeper(util.currentTimeMs)
-	timeChecker = (timeChecker) ? timeChecker : getTimeChecker(util.currentTimeMs)
-	let saltState
 
 	init()
 
@@ -79,6 +76,13 @@ export default function(ws, timeKeeper, timeChecker) {
 		dNonce[0] = 2
 
 		saltState = STATE_INIT
+
+		if (timeKeeper === undefined){
+			timeKeeper = getTimeKeeper(util.currentTimeMs)
+		}
+		if (timeChecker === undefined){
+			timeChecker = getTimeChecker(util.currentTimeMs)
+		}
 
 		ws.onmessage = function(event){
 			receiveQueue.push(new Uint8Array(event.data));
@@ -300,25 +304,19 @@ export default function(ws, timeKeeper, timeChecker) {
 	}
 
 	function createM1(ephPublicKey, hostPub) {
-		let m1Len = (hostPub) ? 74 : 42
-		let m1 = new Uint8Array(m1Len)
 
-		m1.set(VERSION)
-
-		// Header
-		m1[4] = 1	// Packet type 1
-		m1[5] = (hostPub) ? 1 : 0
-
-		// Time
-		setInt32(m1, timeKeeper.getTime(), 6)
-
-		// ClientEncKey
-		m1.set(ephPublicKey, 10)
-
-		// ServerSigKey
-		if (hostPub) {
-			m1.set(hostPub, 42)
+		let time = setInt32(timeKeeper.getTime())
+		if (hostPub === undefined){
+			hostPub = new Uint8Array()
 		}
+		let m1 = new Uint8Array([
+			...VERSION,
+			PacketTypeM1,
+			(hostPub.length !== 0) ? 1 : 0,
+			...time,
+			...ephPublicKey,
+			...hostPub
+		])
 
 		return m1
 	}
@@ -329,7 +327,7 @@ export default function(ws, timeKeeper, timeChecker) {
     	}
 
 		// Header
-		if (validHeader(m2, 2, 0)) {
+		if (validHeader(m2, PacketTypeM2, 0)) {
 
 		} else if (validHeader(m2, 2, 129)) {
 			closeAndThrow('M2: NoSuchServer exception')
@@ -339,14 +337,14 @@ export default function(ws, timeKeeper, timeChecker) {
 		}
 
 		// Time
-		let time = getInt32(m2, 2)
+		let time = getInt32(m2.slice(2, 6))
 		if (time === 0) {
 			timeChecker = getNullTimeChecker()
 		} else if (time !== 1){
 			closeAndThrow('M2: Invalid time value ' + time)
 		}
 
-		let serverPub = getUints(m2, 32, 6)
+		let serverPub = m2.slice(6, 38)
 		return serverPub
 	}
 
@@ -360,13 +358,13 @@ export default function(ws, timeKeeper, timeChecker) {
 			closeAndThrow('EncryptedMessage: Could not decrypt message')
 		}
 		// Header
-		if (!validHeader(m3, 3, 0)) {
+		if (!validHeader(m3, PacketTypeM3, 0)) {
 			closeAndThrow('M3: Bad packet header. Expected 3 0, was ' +
 				m3[0] + ' ' + m3[1])
 		}
 
 		// Time
-		let time = getInt32(m3, 2)
+		let time = getInt32(m3.slice(2, 6))
 		if (timeChecker.delayed(time)) {
 			closeAndThrow('M3: Detected delayed packet')
 		}
@@ -388,23 +386,20 @@ export default function(ws, timeKeeper, timeChecker) {
 	}
 
 	function createM4(signKeyPair, m1Hash, m2Hash) {
-		// Create m4
-		let m4 = new Uint8Array(102)
 
-		// Header
-		m4[0] = 4
-
-		m4.set(signKeyPair.publicKey, 6)
-
+		let time = setInt32(timeKeeper.getTime())
 		let fingerprint = new Uint8Array([...SIG_STR2_BYTES, ...m1Hash, ...m2Hash])
 		let signature = nacl.sign.detached(fingerprint, signKeyPair.secretKey)
 
-		m4.set(signature, 38)
-
-		setInt32(m4, timeKeeper.getTime(), 2)
+		let m4 = new Uint8Array([
+			PacketTypeM4,
+			0,
+			...time,
+			...signKeyPair.publicKey,
+			...signature
+		])
 
 		let encrypted = encrypt(false, m4)
-
 		return encrypted
 	}
 
@@ -432,14 +427,14 @@ export default function(ws, timeKeeper, timeChecker) {
 			return
 		}
 
-		let time = getInt32(clear, 2)
+		let time = getInt32(clear.slice(2, 6))
 		if (timeChecker.delayed(time)) {
 			closeAndThrow('(Multi)AppPacket: Detected a delayed packet')
 		}
 
-		if (validHeader(clear, 5, 0)) {
+		if (validHeader(clear, PacketTypeApp, 0)) {
 			handleAppPacket(clear)
-		} else if (validHeader(clear, 11, 0)) {
+		} else if (validHeader(clear, PacketTypeMultiApp, 0)) {
 			handleMultiAppPacket(clear)
 		} else {
 			closeAndThrow('(Multi)AppPacket: Bad packet header. ' +
@@ -451,27 +446,30 @@ export default function(ws, timeKeeper, timeChecker) {
 	}
 
 	function handleMultiAppPacket(multiAppPacket) {
-		let count = getUint16(multiAppPacket, 6)
+		let count = getUint16(multiAppPacket.slice(6, 8))
 
 		if (count === 0) {
 			closeAndThrow('MultiAppPacket: Zero application messages')
 		}
 
-		let offset = 2 + 4 + 2
+		let buffer = multiAppPacket.slice(8)
 		for (let i = 0; i < count; i++) {
-			let length = getUint16(multiAppPacket, offset)
-			offset += 2
-
-			let data = getUints(multiAppPacket, length, offset)
-			offset += length
-
+			if (buffer.length < 2) {
+				closeAndThrow('MultiAppPacket: Message missing length field')
+			}
+			let length = getUint16(buffer.slice(0, 2))
+			if (buffer.length < 2+length) {
+				closeAndThrow('MultiAppPacket: Incomplete message')
+			}
+			let data = buffer.slice(2, 2+length)
 			messageQueue.push(data);
+
+			buffer = buffer.slice(2+length)
 		}
 	}
 
 	function handleAppPacket(appPacket) {
-
-		let data = getUints(appPacket, appPacket.length - 6, 6)
+		let data = appPacket.slice(6)
 		messageQueue.push(data);
 	}
 
@@ -484,9 +482,9 @@ export default function(ws, timeKeeper, timeChecker) {
 	}
 
 	function decrypt(message) {
-		if (validHeader(message, 6, 0)) {
+		if (validHeader(message, PacketTypeEncrypted, 0)) {
 			// Regular message
-		} else if (validHeader(message, 6, 128)) {
+		} else if (validHeader(message, PacketTypeEncrypted, 128)) {
 			// Last message
 			saltState = STATE_LAST;
 		} else {
@@ -494,22 +492,15 @@ export default function(ws, timeKeeper, timeChecker) {
 				+ message[0] + ' ' + message[1])
 		}
 
-		let bytes = new Uint8Array(message.byteLength - 2)
-		let msg = new Uint8Array(message)
-
-		for (let i = 0; i < message.byteLength - 2; i++) {
-			bytes[i] = msg[i+2]
-		}
-
+		let bytes = message.slice(2)
 		let clear = nacl.secretbox.open(bytes, dNonce, sessionKey)
-		dNonce = increaseNonce2(dNonce)
 
 		if (!clear) {
 			closeAndThrow('EncryptedMessage: Could not decrypt message')
 		}
-		clear = new Uint8Array(clear)
-
-		return clear
+		
+		dNonce = increaseNonce2(dNonce)
+		return new Uint8Array(clear)
 	}
 
 	function validHeader(uints, first, second, offset = 0) {
@@ -519,42 +510,22 @@ export default function(ws, timeKeeper, timeChecker) {
 		return true
 	}
 
-	function getUints(from, length, offset = 0) {
-		let uints = new Uint8Array(length)
-
-		for (let i = 0; i < length; i++) {
-			uints[i] = from[offset++]
-		}
-
-		return uints
+	function getInt32(bytes) {
+		return (new Int32Array(bytes.buffer))[0]
 	}
 
-	function getInt32(uints, offset) {
-		let int32 = new Uint8Array(4)
-		int32[0] = uints[offset++]
-		int32[1] = uints[offset++]
-		int32[2] = uints[offset++]
-		int32[3] = uints[offset++]
-
-		return (new Int32Array(int32.buffer))[0]
+	function setInt32(number) {
+		let array = new Int32Array([number])
+		return new Uint8Array(array.buffer)
 	}
 
-	function setInt32(uints, data, offset) {
-		let view = new DataView(uints.buffer);
-		view.setUint32(offset, data, true);
+	function getUint16(bytes) {
+		return (new Uint16Array(bytes.buffer))[0]
 	}
 
-	function getUint16(uints, offset) {
-		let uint16 = new Uint8Array(2)
-		uint16[0] = uints[offset++]
-		uint16[1] = uints[offset]
-
-		return (new Uint16Array(uint16.buffer))[0]
-	}
-
-	function setUint16(uints, data, offset) {
-		let view = new DataView(uints.buffer);
-		view.setUint16(offset, data, true);
+	function setUint16(number) {
+		let array = new Int16Array([number])
+		return new Uint8Array(array.buffer)
 	}
 
 	function send(last, arg) {
@@ -565,23 +536,23 @@ export default function(ws, timeKeeper, timeChecker) {
 			saltState = STATE_LAST
 		}
 
+		let messages
 		if (arguments.length === 2) {
 			if (util.isArray(arg)) {
-				if (arg.length === 1) {
-					sendAppPacket(last, arg[0])
-				} else {
-					sendMultiAppPacket(last, arg)
-				}
+				messages = arg
 			} else {
-				sendAppPacket(last, arg)
+				messages = [arg]
 			}
+		}
+		else {
+			messages = Array.from(arguments).slice(1)
+		}
+		
+		messages = validateAndFix(messages)
+		if (messages.length === 1) {
+			sendAppPacket(last, messages[0])
 		} else {
-			// turn arguments into an array
-			let arr = []
-			for (let i = 1; i < arguments.length; i++) {
-				arr[i-1] = arguments[i]
-			}
-			sendMultiAppPacket(last, arr)
+			sendMultiAppPacket(last, messages)
 		}
 
 		if (saltState === STATE_LAST) {
@@ -589,73 +560,75 @@ export default function(ws, timeKeeper, timeChecker) {
 		}
 	}
 
-	function sendAppPacket(last, data) {
-		if (data instanceof ArrayBuffer) {
-			data = new Uint8Array(data)
-		} else if (!(data instanceof Uint8Array)) {
-			throw new TypeError('Expected data to be ArrayBuffer or Uint8Array')
+	function validateAndFix(messages){
+		let results = []
+		for (let message of messages) {
+			let result = message
+			if (message instanceof ArrayBuffer) {
+				result = new Uint8Array(message)
+			}
+			else if (!(message instanceof Uint8Array)) {
+				throw new TypeError('Expected data to be ArrayBuffer or Uint8Array')
+			}
+
+			if (result.length > 65535) {
+				throw new RangeError('Application message ' + i + ' too large')
+			}
+			results.push(result)
 		}
+		return results
+	}
 
-		let appPacket = new Uint8Array(data.length + 6)
+	function sendAppPacket(last, message) {
+		let time = setInt32(timeKeeper.getTime())
 
-		appPacket[0] = 5
-		appPacket.set(data, 6)
-
-		setInt32(appPacket, timeKeeper.getTime(), 2)
+		let appPacket = new Uint8Array([
+			PacketTypeApp,
+			0,
+			...time,
+			...message
+		])
 
 		let encrypted = encrypt(last, appPacket)
 		sendOnWs(encrypted)
 	}
 
-	function sendMultiAppPacket(last, arr) {
-		if (arr.length > 65535) {
+	function sendMultiAppPacket(last, messages) {
+		if (messages.length > 65535) {
 			throw new RangeError('Too many application messages')
 		}
-		let size = 2 + 4 + 2
-		for (let i = 0; i < arr.length; i++) {
-			if (arr[i] instanceof ArrayBuffer) {
-				arr[i] = new Uint8Array(arr[i])
-			} else if (!(arr[i] instanceof Uint8Array)) {
-				throw new TypeError('Expected data to be ArrayBuffer or Uint8Array')
-			}
-			if (arr[i].length > 65535) {
-				throw new RangeError('Application message ' + i + ' too large')
-			}
-			size += 2 + arr[i].length
-		}
 
-		let multiAppPacket = new Uint8Array(size)
-		multiAppPacket[0] = 11
+		let time = setInt32(timeKeeper.getTime())
+		let count = setUint16(messages.length)
 
-		let offset = 6
-		setUint16(multiAppPacket, arr.length, offset)
+		let multiAppPacket = new Uint8Array([
+			PacketTypeMultiApp,
+			0,
+			...time,
+			...count
+		])
 
-		offset = 8
-		for (let i = 0; i < arr.length; i++) {
-			writeMessage(multiAppPacket, arr[i], offset)
-			offset += arr[i].length + 2
-		}
-
-		setInt32(multiAppPacket, timeKeeper.getTime(), 2)
+		for (const message of messages){
+			let size = setUint16(message.length)
+			multiAppPacket = new Uint8Array([
+				...multiAppPacket,
+				...size,
+				...message])
+		};
 
 		let encrypted = encrypt(last, multiAppPacket)
 		sendOnWs(encrypted)
-	}
-
-	function writeMessage(multiAppPacket, uints, offset) {
-		setUint16(multiAppPacket, uints.length, offset)
-		offset += 2
-		multiAppPacket.set(uints, offset)
 	}
 
 	function encrypt(last, clearBytes) {
 		let body = nacl.secretbox(clearBytes, eNonce, sessionKey)
 		eNonce = increaseNonce2(eNonce)
 
-		let encryptedMessage = new Uint8Array(body.length + 2)
-		encryptedMessage[0] = 6
-		encryptedMessage[1] = last ? 128 : 0
-		encryptedMessage.set(body, 2)
+		let encryptedMessage = new Uint8Array([
+			PacketTypeEncrypted,
+			last ? 128 : 0,
+			...body
+		])
 
 		return encryptedMessage
 	}
