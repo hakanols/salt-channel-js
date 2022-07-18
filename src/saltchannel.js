@@ -46,9 +46,6 @@ export default function(ws, timeKeeper, timeChecker) {
 	const WS_CLOSED = 3
 
 	let saltState
-	let eNonce
-	let dNonce
-	let sessionKey
 	let receiveQueue = util.waitQueue();
 	let messageQueue = [];
 	let closeTrigger = util.triggWaiter()
@@ -56,10 +53,6 @@ export default function(ws, timeKeeper, timeChecker) {
 	init()
 
 	function close() {
-		eNonce = undefined
-		dNonce = undefined
-		sessionKey = undefined
-
 		saltState = STATE_CLOSED
 
 		timeKeeper.reset()
@@ -70,11 +63,6 @@ export default function(ws, timeKeeper, timeChecker) {
 	}
 
 	function init() {
-		eNonce = new Uint8Array(nacl.secretbox.nonceLength)
-		dNonce = new Uint8Array(nacl.secretbox.nonceLength)
-		eNonce[0] = 1
-		dNonce[0] = 2
-
 		saltState = STATE_INIT
 
 		if (timeKeeper === undefined){
@@ -93,7 +81,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		return (await receiveQueue.pull(waitTime))[0];
 	}
 
-	async function receive(waitTime){
+	async function receive(waitTime, storage){
 		let message = messageQueue.shift();
 		if (message == undefined){
 			let data = await Promise.race([
@@ -101,7 +89,7 @@ export default function(ws, timeKeeper, timeChecker) {
 				closeTrigger.waiter(waitTime+1000)
 			])
 			if (data != null){
-				handleMessage(data)
+				handleMessage(data, storage)
 				message = messageQueue.shift()
 			}
 		}
@@ -238,20 +226,34 @@ export default function(ws, timeKeeper, timeChecker) {
 		let m2 = await receiveData(1000)
 		let serverPub = handleM2(m2)
 
-		sessionKey = nacl.box.before(serverPub, ephKeyPair.secretKey)
+		
 		let m1Hash = nacl.hash(m1)
 		let m2Hash = nacl.hash(m2)
 
+		let storage = {
+			myNonce: new Uint8Array(nacl.secretbox.nonceLength),
+			theirNonce: new Uint8Array(nacl.secretbox.nonceLength),
+			sessionKey: nacl.box.before(serverPub, ephKeyPair.secretKey)
+		}
+		storage.myNonce[0] = 1
+		storage.theirNonce[0] = 2
+
 		let m3 = await receiveData(1000)
-		handleM3(m3, hostSigPub, m1Hash, m2Hash)
-		let m4 = createM4(sigKeyPair, m1Hash, m2Hash)
+		handleM3(m3, storage, hostSigPub, m1Hash, m2Hash)
+		let m4 = createM4(storage, sigKeyPair, m1Hash, m2Hash)
 		sendOnWs(m4)
 		
 		saltState = STATE_READY
 
 		return {
-			send: send,
-			receive: receive,
+			send: function(waitTime){
+				let messages = extactMessages(Array.from(arguments))
+				messages = validateAndFix(messages)
+				send(waitTime, messages, storage)
+			},
+			receive: async function(waitTime){
+				return await receive(waitTime, storage)
+			},
 			getState: getState
 		}
 	}
@@ -348,12 +350,12 @@ export default function(ws, timeKeeper, timeChecker) {
 		return serverPub
 	}
 
-	function handleM3(data, hostPub, m1Hash, m2Hash) {
+	function handleM3(rawM3, storage, hostPub, m1Hash, m2Hash) {
 		if (saltState !== STATE_HAND) {
 			closeAndThrow('M3: Invalid internal state: ' + saltState)
 		}
 
-		let m3 = decrypt(data)
+		let m3 = decrypt(rawM3, storage)
 		if (!m3) {
 			closeAndThrow('EncryptedMessage: Could not decrypt message')
 		}
@@ -385,7 +387,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		}
 	}
 
-	function createM4(signKeyPair, m1Hash, m2Hash) {
+	function createM4(storage, signKeyPair, m1Hash, m2Hash) {
 
 		let time = setInt32(timeKeeper.getTime())
 		let fingerprint = new Uint8Array([...SIG_STR2_BYTES, ...m1Hash, ...m2Hash])
@@ -399,7 +401,7 @@ export default function(ws, timeKeeper, timeChecker) {
 			...signature
 		])
 
-		let encrypted = encrypt(false, m4)
+		let encrypted = encrypt(false, m4, storage)
 		return encrypted
 	}
 
@@ -417,12 +419,12 @@ export default function(ws, timeKeeper, timeChecker) {
 		}
 	}
 
-	function handleMessage(bytes) {
+	function handleMessage(bytes, storage) {
 		if (saltState !== STATE_READY) {
 			closeAndThrow('Received message when salt channel was not ready')
 		}
 
-		let clear = decrypt(bytes)
+		let clear = decrypt(bytes, storage)
 		if (!clear) {
 			return
 		}
@@ -481,7 +483,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		}
 	}
 
-	function decrypt(message) {
+	function decrypt(message, storage) {
 		if (validHeader(message, PacketTypeEncrypted, 0)) {
 			// Regular message
 		} else if (validHeader(message, PacketTypeEncrypted, 128)) {
@@ -493,13 +495,13 @@ export default function(ws, timeKeeper, timeChecker) {
 		}
 
 		let bytes = message.slice(2)
-		let clear = nacl.secretbox.open(bytes, dNonce, sessionKey)
+		let clear = nacl.secretbox.open(bytes, storage.theirNonce, storage.sessionKey)
 
 		if (!clear) {
 			closeAndThrow('EncryptedMessage: Could not decrypt message')
 		}
 		
-		dNonce = increaseNonce2(dNonce)
+		storage.theirNonce = increaseNonce2(storage.theirNonce)
 		return new Uint8Array(clear)
 	}
 
@@ -528,35 +530,34 @@ export default function(ws, timeKeeper, timeChecker) {
 		return new Uint8Array(array.buffer)
 	}
 
-	function send(last, arg) {
+	function send(last, messages, storage) {
 		if (saltState !== STATE_READY) {
 			closeAndThrow('Invalid state: ' + saltState)
 		}
 		if (last) {
 			saltState = STATE_LAST
 		}
-
-		let messages
-		if (arguments.length === 2) {
-			if (util.isArray(arg)) {
-				messages = arg
-			} else {
-				messages = [arg]
-			}
-		}
-		else {
-			messages = Array.from(arguments).slice(1)
-		}
-		
-		messages = validateAndFix(messages)
 		if (messages.length === 1) {
-			sendAppPacket(last, messages[0])
+			sendAppPacket(last, messages[0], storage)
 		} else {
-			sendMultiAppPacket(last, messages)
+			sendMultiAppPacket(last, messages, storage)
 		}
 
 		if (saltState === STATE_LAST) {
 			close()
+		}
+	}
+
+	function extactMessages(args){
+		if (args.length === 2) {
+			if (util.isArray(args[1])) {
+				return args[1]
+			} else {
+				return [args[1]]
+			}
+		}
+		else {
+			return args.slice(1)
 		}
 	}
 
@@ -579,7 +580,7 @@ export default function(ws, timeKeeper, timeChecker) {
 		return results
 	}
 
-	function sendAppPacket(last, message) {
+	function sendAppPacket(last, message, storage) {
 		let time = setInt32(timeKeeper.getTime())
 
 		let appPacket = new Uint8Array([
@@ -589,11 +590,11 @@ export default function(ws, timeKeeper, timeChecker) {
 			...message
 		])
 
-		let encrypted = encrypt(last, appPacket)
+		let encrypted = encrypt(last, appPacket, storage)
 		sendOnWs(encrypted)
 	}
 
-	function sendMultiAppPacket(last, messages) {
+	function sendMultiAppPacket(last, messages, storage) {
 		if (messages.length > 65535) {
 			throw new RangeError('Too many application messages')
 		}
@@ -616,13 +617,13 @@ export default function(ws, timeKeeper, timeChecker) {
 				...message])
 		};
 
-		let encrypted = encrypt(last, multiAppPacket)
+		let encrypted = encrypt(last, multiAppPacket, storage)
 		sendOnWs(encrypted)
 	}
 
-	function encrypt(last, clearBytes) {
-		let body = nacl.secretbox(clearBytes, eNonce, sessionKey)
-		eNonce = increaseNonce2(eNonce)
+	function encrypt(last, clearBytes, storage) {
+		let body = nacl.secretbox(clearBytes, storage.myNonce, storage.sessionKey)
+		storage.myNonce = increaseNonce2(storage.myNonce)
 
 		let encryptedMessage = new Uint8Array([
 			PacketTypeEncrypted,
@@ -659,8 +660,88 @@ export default function(ws, timeKeeper, timeChecker) {
 		return nonce
 	}
 
+	/*
+	function handleM1(m1){
+		if (saltState !== STATE_HAND) {
+			closeAndThrow('M2: Invalid internal state: ' + saltState)
+		}
+
+		// Header
+		if (!validHeader(m1, PacketTypeM2, 0)) {
+			closeAndThrow('M2: Bad packet header. Expected 1 0'
+				+ m2[0] + ' ' + m2[1])
+		}
+
+		// Time
+		let time = getInt32(m2.slice(2, 6))
+	}
+
+	function createM2(ephPublicKey) { 
+		let header = new Uint8Array([PacketTypeM2, 0])
+		let time = new Int32Array([1, 0, 0, 0]) // Time is supported
+	
+		let m2 = new Uint8Array([
+			...header, 
+			...time,
+			...ephPublicKey])
+	
+		return m2;
+	}
+
+	function createM3(sigKeyPair, m1Hash, m2Hash) {
+
+		let header = new Uint8Array([PacketTypeM3, 0])
+	
+		let time = new Int32Array([util.currentTimeMs() - serverData.sEpoch])
+		time = new Uint8Array(time.buffer)
+	
+		let concat = new Uint8Array([...SIG_STR1_BYTES, ...m1Hash, ...m2Hash])
+		let signature = nacl.sign.detached(concat, sigKeyPair.secretKey)
+	
+		let m3 = new Uint8Array([
+			...header, 
+			...time,
+			...sigKeyPair.publicKey,
+			...signature])
+	
+		let encrypted = encrypt(serverData, m3)
+		return encrypted
+	}
+
+	async function serverHandshake(sigKeyPair, ephKeyPair) {
+		verifySigKeyPair(sigKeyPair)
+		verifyEphKeyPair(ephKeyPair)
+		if (saltState !== STATE_INIT) {
+			closeAndThrow('Handshake: Invalid internal state: ' + saltState)
+		}
+		saltState = STATE_HAND
+
+		let m1 = await receiveData(1000)
+		let clientEmpPub = handleM1(m1)
+		let m2 = createM2(ephKeyPair.publicKey)
+
+		sessionKey = nacl.box.before(clientEmpPub, ephKeyPair.secretKey)
+		let m1Hash = nacl.hash(m1)
+		let m2Hash = nacl.hash(m2)
+
+		let m3 = createM3(sigKeyPair, m1Hash, m2Hash)
+		sendOnWs(m2)
+		sendOnWs(m3)
+		let m4 = await receiveData(1000)
+		let clientSigPub = handleM4(m4, m1Hash, m2Hash)
+		
+		saltState = STATE_READY
+
+		return {
+			send: send,
+			receive: receive,
+			getState: getState
+		}
+	}*/
+
 	return {
 		a1a2: a1a2,
-		handshake: handshake
+		handshake: handshake,
+		//serverHandshake: serverHandshake
 	}
 }
