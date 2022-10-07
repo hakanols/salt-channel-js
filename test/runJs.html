@@ -39,7 +39,7 @@
 
             function noPath(file){
                 const fileParts = file.split('.');
-                const validCharacters = "^[a-zA-Z]+$";
+                const validCharacters = "^[a-zA-Z\-]+$";
                 return fileParts.length == 2 && fileParts[0].match(validCharacters) && fileParts[1].match(validCharacters)
             }
 
