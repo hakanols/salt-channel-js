@@ -741,16 +741,81 @@ export default function(ws, timeKeeper, timeChecker) {
 		return clientSigKey
 	}
 
-	async function serverHandshake(sigKeyPair, ephKeyPair) {
-		verifySigKeyPair(sigKeyPair)
-		verifyEphKeyPair(ephKeyPair)
+	function padProtocol(prot){
+		const totLength = 10
+		const padChar = '-'.charCodeAt(0)
+		if (prot.length > 10){
+			throw new Error('Protocol indecator is to long '+prot.length)
+		}
+		return prot.concat(Array(totLength-prot.length).fill(padChar));
+	}
+
+	function checkProtocol(prot, message){
+		return util.bufferEquals( prot,  message.slice(0, prot.length))
+	}
+
+	function serverA1A2(protocols, message){
+		if (util.bufferEquals(message.slice(2, 5), [0, 0, 0])){
+			const LastFlag = 128
+			const defaultExtra = [...'----------'].map(letter=>letter.charCodeAt(0))
+		
+			let a2 = new Uint8Array([
+				PacketTypeA2,
+				LastFlag,
+				protocols.length,
+			])
+			for (let i = 0; i < protocols.length; i++) {
+				a2 = new Uint8Array([
+					...a2,
+					...padProtocol(protocols[i]),
+					...defaultExtra
+				])
+			}
+			sendOnWs(a2)
+		}
+		else {
+			closeAndThrow('A1 with key request is not suported. Message: '+ message)
+		}
+	}
+
+	async function serverRun(protocols, waitTime) {
 		if (saltState !== STATE_INIT) {
 			closeAndThrow('Handshake: Invalid internal state: ' + saltState)
 		}
 		saltState = STATE_HAND
 
-		let m1 = await receiveData(1000)
+		let message = await receiveData(waitTime)
+		if(message == null){ // No message
+			return
+		}
+		else if (util.bufferEquals(message.slice(0, 2), [PacketTypeA1, 0])){ // Is A1
+			serverA1A2(protocols, message)
+			return {
+				protocol: "A1",
+				message: ""
+			}
+		}
+		else {
+			for (let i = 0; i < protocols.length; i++) {
+				let protocol = protocols[i]
+				if (checkProtocol(protocol, message)){
+					return {
+						protocol: protocol,
+						message: message
+					}
+				}
+			}
+			closeAndThrow('Unknown protocol '+ message)
+		}
+	}
+
+	async function serverHandshake(m1, sigKeyPair, ephKeyPair) {
+		verifySigKeyPair(sigKeyPair)
+		verifyEphKeyPair(ephKeyPair)
 		let m1Return = handleM1(m1)
+		if (!(m1Return.serverSigKey != null && !util.bufferEquals(m1Return.serverSigKey, sigKeyPair.publicKey))) {
+			closeAndThrow('Handshake: Invalid internal state: ' + saltState)
+		}
 		let m2 = createM2(ephKeyPair.publicKey)
 
 		let storage = {
@@ -788,6 +853,7 @@ export default function(ws, timeKeeper, timeChecker) {
 	return {
 		a1a2: a1a2,
 		handshake: handshake,
+		serverRun: serverRun,
 		serverHandshake: serverHandshake
 	}
 }

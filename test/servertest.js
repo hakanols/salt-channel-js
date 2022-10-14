@@ -32,30 +32,60 @@ secretKey: util.hex2ab('5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27
 
 const sessionKey = util.hex2ab('1b27556473e985d462cd51197a9a46c76009549eac6474f206c4ee0844f68389')
 
-test('session1', async function (t) {
+test('serverSession1', async function (t) {
 	let [mockSocket, testSocket] = misc.createMockSocket()
 	testSocket.setState(mockSocket.OPEN)
 
 	let clientPromise = async function(){
 		await util.sleep(100)
-        testSocket.send(session1M1Bytes)
+		testSocket.send(session1M1Bytes)
 		let m2 = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(m2), session1M2Bytes, 'Check M2')
 		let m3 = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(m3), session1M3Bytes, 'Check M3')
 		testSocket.send(session1M4Bytes)
-        testSocket.send(session1AppBytes)
+		testSocket.send(session1AppBytes)
 		let app = await testSocket.receive(1000)
 		t.arrayEqual(new Uint8Array(app), session1EchoBytes, 'Check App')
 	}()
 
 	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
 
-	let channel = await sc.serverHandshake(serverSigKeyPair, serverEphKeyPair)
-    let event = await channel.receive(1000)
+	const VERSION = [...'SCv2'].map(letter=>letter.charCodeAt(0))
+	let {protocol, message} = await sc.serverRun([VERSION], 1000)
+	t.arrayEqual(VERSION, protocol, 'Check protocol')
+	let channel = await sc.serverHandshake(message, serverSigKeyPair, serverEphKeyPair)
+	let event = await channel.receive(1000)
 	t.arrayEqual(new Uint8Array(event.message), request, 'Check echo')
 	channel.send(true, request)
 
 	await clientPromise;
+
+	t.end();
+})
+
+test('serverA1A2', async function (t) {
+	let [mockSocket, testSocket] = misc.createMockSocket()
+	testSocket.setState(mockSocket.OPEN)
+
+	let clientPromise = async function(){
+		await util.sleep(100)
+		let a1 = [8, 0, 0, 0, 0]
+		testSocket.send(a1)
+		let a2 = await testSocket.receive(1000)
+		let expected = new Uint8Array([ 9, 128, 1,
+			...[...'SCv2------'].map(letter=>letter.charCodeAt(0)),
+			...[...'----------'].map(letter=>letter.charCodeAt(0))
+		])
+
+		t.arrayEqual(expected, new Uint8Array(a2), 'Check A2')
+	}()
+
+	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
+
+	const VERSION = [...'SCv2'].map(letter=>letter.charCodeAt(0))
+	await sc.serverRun([VERSION], 1000)
+	await clientPromise;
+
 	t.end();
 })
