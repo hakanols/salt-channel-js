@@ -246,10 +246,10 @@ export default function(ws, timeKeeper, timeChecker) {
 		saltState = STATE_READY
 
 		return {
-			send: function(waitTime){
+			send: function(last){
 				let messages = extactMessages(Array.from(arguments))
 				messages = validateAndFix(messages)
-				send(waitTime, messages, storage)
+				send(last, messages, storage)
 			},
 			receive: async function(waitTime){
 				return await receive(waitTime, storage)
@@ -340,7 +340,7 @@ export default function(ws, timeKeeper, timeChecker) {
 
 		// Time
 		let time = getInt32(m2.slice(2, 6))
-		if (time === 0) {
+		if (time === 0) { // ToDo: Checkif tis correct. Should it not be: (timeChecker.delayed(time))
 			timeChecker = getNullTimeChecker()
 		} else if (time !== 1){
 			closeAndThrow('M2: Invalid time value ' + time)
@@ -660,26 +660,41 @@ export default function(ws, timeKeeper, timeChecker) {
 		return nonce
 	}
 
-	/*
 	function handleM1(m1){
 		if (saltState !== STATE_HAND) {
-			closeAndThrow('M2: Invalid internal state: ' + saltState)
+			closeAndThrow('M1: Invalid internal state: ' + saltState)
 		}
-
-		// Header
-		if (!validHeader(m1, PacketTypeM2, 0)) {
-			closeAndThrow('M2: Bad packet header. Expected 1 0'
-				+ m2[0] + ' ' + m2[1])
+		
+		if (6 >= m1.length){
+			closeAndThrow('M1 Length: To short massage. Length is '+ m1.length)
+		} 
+		if(!util.bufferEquals(m1.slice(0, 4), VERSION)){
+			closeAndThrow('M1 Version: ' +m1.slice(0, 4) + ' Expected: ' + VERSION)
 		}
+		if (m1[4] != PacketTypeM1){
+			closeAndThrow('M1 Header: ' + m1[4] + ' Expected: ' + PacketTypeM1)
+		}
+		if (!(m1[5] in [0, 1] )){
+			closeAndThrow('M1 Header: ' + m1[5] + ' Expected: 0 or 1')
+		}
+		let expectedServKey = (m1[5] == 1)
+		let expectedLength = 42 + (expectedServKey ? 0 : 32)
+		if( m1.length == expectedLength){
+			closeAndThrow('M1: Check packet length:' + m1.length)
+		}
+	
+		let time = getInt32(m1.slice(6, 10))
+		// ToDo check time
 
-		// Time
-		let time = getInt32(m2.slice(2, 6))
+		return {
+			publicEphemeral: m1.slice(10, 42),
+			serverSigKey: expectedServKey ? null : m1.slice(42, 74) 
+		}
 	}
 
 	function createM2(ephPublicKey) { 
 		let header = new Uint8Array([PacketTypeM2, 0])
-		let time = new Int32Array([1, 0, 0, 0]) // Time is supported
-	
+		let time = setInt32(timeKeeper.getTime())
 		let m2 = new Uint8Array([
 			...header, 
 			...time,
@@ -688,24 +703,42 @@ export default function(ws, timeKeeper, timeChecker) {
 		return m2;
 	}
 
-	function createM3(sigKeyPair, m1Hash, m2Hash) {
-
+	function createM3(sigKeyPair, storage, m1Hash, m2Hash) {
 		let header = new Uint8Array([PacketTypeM3, 0])
-	
-		let time = new Int32Array([util.currentTimeMs() - serverData.sEpoch])
-		time = new Uint8Array(time.buffer)
-	
+		let time = setInt32(timeKeeper.getTime())
 		let concat = new Uint8Array([...SIG_STR1_BYTES, ...m1Hash, ...m2Hash])
 		let signature = nacl.sign.detached(concat, sigKeyPair.secretKey)
-	
 		let m3 = new Uint8Array([
 			...header, 
 			...time,
 			...sigKeyPair.publicKey,
 			...signature])
 	
-		let encrypted = encrypt(serverData, m3)
-		return encrypted
+			let encrypted = encrypt(false, m3, storage)
+			return encrypted
+	}
+
+	function handleM4(encryptedM4, storage, m1Hash, m2Hash) {
+
+		let m4 = decrypt(new Uint8Array(encryptedM4), storage)
+
+		if(!util.bufferEquals(m4.slice(0, 2), [PacketTypeM4, 0])){
+			closeAndThrow('M4: Check header: ' +m4.slice(0, 2) + ' Expected: ' + [PacketTypeM4, 0])
+		}
+	
+		let time = getInt32(m4.slice(2,6))
+		if (timeChecker.delayed(time)){
+			closeAndThrow('M4: Check time to be set: ' +util.ab2hex(time))
+		}
+	
+		let clientSigKey = m4.slice(6,38)
+		let signature = m4.slice(38,102)
+		let concat = new Uint8Array([...SIG_STR2_BYTES, ...m1Hash, ...m2Hash])
+		let success = nacl.sign.detached.verify(concat, signature, clientSigKey)
+		if (!success){
+			closeAndThrow('M4: Could not verify signature')
+		} 
+		return clientSigKey
 	}
 
 	async function serverHandshake(sigKeyPair, ephKeyPair) {
@@ -717,31 +750,44 @@ export default function(ws, timeKeeper, timeChecker) {
 		saltState = STATE_HAND
 
 		let m1 = await receiveData(1000)
-		let clientEmpPub = handleM1(m1)
+		let m1Return = handleM1(m1)
 		let m2 = createM2(ephKeyPair.publicKey)
 
-		sessionKey = nacl.box.before(clientEmpPub, ephKeyPair.secretKey)
+		let storage = {
+			myNonce: new Uint8Array(nacl.secretbox.nonceLength),
+			theirNonce: new Uint8Array(nacl.secretbox.nonceLength),
+			sessionKey: nacl.box.before(m1Return.publicEphemeral, ephKeyPair.secretKey)
+		}
+		storage.myNonce[0] = 2
+		storage.theirNonce[0] = 1
 		let m1Hash = nacl.hash(m1)
 		let m2Hash = nacl.hash(m2)
 
-		let m3 = createM3(sigKeyPair, m1Hash, m2Hash)
+		let m3 = createM3(sigKeyPair, storage, m1Hash, m2Hash)
 		sendOnWs(m2)
 		sendOnWs(m3)
 		let m4 = await receiveData(1000)
-		let clientSigPub = handleM4(m4, m1Hash, m2Hash)
+		let clientSigPub = handleM4(m4, storage, m1Hash, m2Hash)
 		
 		saltState = STATE_READY
 
 		return {
-			send: send,
-			receive: receive,
-			getState: getState
+			send: function(last){
+				let messages = extactMessages(Array.from(arguments))
+				messages = validateAndFix(messages)
+				send(last, messages, storage)
+			},
+			receive: async function(waitTime){
+				return await receive(waitTime, storage)
+			},
+			getState: getState,
+			clientSigPub: clientSigPub
 		}
-	}*/
+	}
 
 	return {
 		a1a2: a1a2,
 		handshake: handshake,
-		//serverHandshake: serverHandshake
+		serverHandshake: serverHandshake
 	}
 }
