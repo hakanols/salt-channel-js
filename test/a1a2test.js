@@ -1,4 +1,4 @@
-import saltChannelSession from '../src/saltchannel.js';
+import * as saltChannel from '../src/saltchannel.js';
 import * as util from '../lib/util.js';
 import nacl from '../lib/nacl-fast-es.js';
 import test from './tap-esm.js';
@@ -41,7 +41,7 @@ test('nonInit', async function (t) {
 		testSocket.send(a2)
 	}()
 
-	let sc = saltChannelSession(mockSocket)
+	let sc = saltChannel.client(mockSocket)
 
 	let a1a2Promise = sc.a1a2()
 
@@ -146,7 +146,7 @@ async function runTest(t, validateA1, createaA2, adress) {
 		testSocket.send(a2)
 	}()
 
-	let sc = saltChannelSession(mockSocket)
+	let sc = saltChannel.client(mockSocket)
 
 	let prots = await sc.a1a2(adress)
 	validateA2Response(t, prots, expectedProtCount)

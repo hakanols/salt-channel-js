@@ -1,7 +1,6 @@
-import saltChannelSession from '../src/saltchannel.js';
+import * as saltChanne from '../src/saltchannel.js';
 import * as util from '../lib/util.js';
 import nacl from '../lib/nacl-fast-es.js';
-import getTimeChecker from '../src/time/typical-time-checker.js';
 import test from './tap-esm.js'
 import * as misc from './misc.js'
 
@@ -57,7 +56,7 @@ test('withServSigKey', async function (t) {
 	let [mockSocketInterface, testInterface] = misc.createMockSocket()
 	testInterface.setState(mockSocketInterface.OPEN)
 
-	let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+	let sc = saltChanne.client(mockSocketInterface, undefined, undefined)
 
 	let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey, serverSigKeyPair.publicKey)
 
@@ -199,8 +198,8 @@ test('receiveDelayed', async function (t) {
 	let [mockSocketInterface, testInterface] = misc.createMockSocket()
 	testInterface.setState(mockSocketInterface.OPEN)
 
-	let timeChecker = getTimeChecker(util.currentTimeMs, 10)
-	let sc = saltChannelSession(mockSocketInterface, undefined, timeChecker)
+	let timeChecker = saltChanne.typical_time_checker(util.currentTimeMs, 10)
+	let sc = saltChanne.client(mockSocketInterface, undefined, timeChecker)
 
 	const threshold = 20
 	let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey, undefined, threshold)
@@ -390,7 +389,7 @@ test('receiveBadPubEph', async function (t) {
 	let [mockSocketInterface, testInterface] = misc.createMockSocket()
 	testInterface.setState(mockSocketInterface.OPEN)
 
-	let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+	let sc = saltChanne.client(mockSocketInterface, undefined, undefined)
 
 	let serverPromise = async function(){
 		testInterface.serverData = createServerData();
@@ -748,7 +747,7 @@ async function standardHandshake(t){
 	let [mockSocketInterface, testInterface] = misc.createMockSocket()
 	testInterface.setState(mockSocketInterface.OPEN)
 
-	let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+	let sc = saltChanne.client(mockSocketInterface, undefined, undefined)
 
 	let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey)
 
@@ -765,7 +764,7 @@ async function testBadM2(t, m2, sigKey, expectedError){
 	let [mockSocketInterface, testInterface] = misc.createMockSocket()
 	testInterface.setState(mockSocketInterface.OPEN)
 
-	let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+	let sc = saltChanne.client(mockSocketInterface, undefined, undefined)
 
 	let serverPromise = async function(){
 		await testInterface.receive(1000)
@@ -784,7 +783,7 @@ async function testBadM3(t, badData, sigKey, expectedError){
 	let [mockSocketInterface, testInterface] = misc.createMockSocket()
 	testInterface.setState(mockSocketInterface.OPEN)
 
-	let sc = saltChannelSession(mockSocketInterface, undefined, undefined)
+	let sc = saltChanne.client(mockSocketInterface, undefined, undefined)
 
 	let serverPromise = async function(){
 		let serverData = createServerData()

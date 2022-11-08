@@ -1,8 +1,6 @@
-import saltChannelSession from '../src/saltchannel.js';
+import * as saltChannel from '../src/saltchannel.js';
 import * as util from '../lib/util.js';
 import nacl from '../lib/nacl-fast-es.js';
-import getTimeKeeper from '../src/time/typical-time-keeper.js';
-import getNullTimeKeeper from '../src/time/null-time-keeper.js';
 import test from './tap-esm.js';
 import * as misc from './misc.js'
 
@@ -75,7 +73,7 @@ test('session1', async function (t) {
 		testSocket.send(session1EchoBytes)
 	}()
 
-	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
+	let sc = saltChannel.client(mockSocket, saltChannel.null_time_keeper())
 
 	let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair)
 	channel.send(false, request)
@@ -96,7 +94,7 @@ test('session2', async function (t) {
 		testSocket.send(session2A2Bytes)
 	}()
 
-	let sc = saltChannelSession(mockSocket)
+	let sc = saltChannel.client(mockSocket)
 
 	let prots = await sc.a1a2(adress)
 	t.equal(prots.length, 1, 'Check prots length')
@@ -136,7 +134,7 @@ test('session3', async function (t) {
 		testSocket.send(session3Echo2Bytes)
 	}()
 
-	let sc = saltChannelSession(mockSocket, getTimeKeeper(getTime))
+	let sc = saltChannel.client(mockSocket, saltChannel.typical_time_keeper(getTime))
 
 	let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair)
 	channel.send(false, request)
@@ -168,9 +166,9 @@ test('session4', async function (t) {
 		testSocket.send(session4EchoBytes)
 	}()
 
-	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
+	let sc = saltChannel.client(mockSocket, saltChannel.null_time_keeper())
 
-	let  channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey)
+	let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey)
 	channel.send(false, request)
 	let event = await channel.receive(1000)
 	t.arrayEqual(new Uint8Array(event.message), request, 'Check echo')

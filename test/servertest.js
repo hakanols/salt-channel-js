@@ -1,8 +1,6 @@
-import saltChannelSession from '../src/saltchannel.js';
+import * as saltChannel from '../src/saltchannel.js';
 import * as util from '../lib/util.js';
 import nacl from '../lib/nacl-fast-es.js';
-import getTimeKeeper from '../src/time/typical-time-keeper.js';
-import getNullTimeKeeper from '../src/time/null-time-keeper.js';
 import test from './tap-esm.js';
 import * as misc from './misc.js'
 
@@ -49,12 +47,12 @@ test('serverSession1', async function (t) {
 		t.arrayEqual(new Uint8Array(app), session1EchoBytes, 'Check App')
 	}()
 
-	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
+	let sc = saltChannel.server(mockSocket, saltChannel.null_time_keeper())
 
 	const VERSION = [...'SCv2'].map(letter=>letter.charCodeAt(0))
-	let {protocol, message} = await sc.serverRun([VERSION], 1000)
+	let {protocol, message} = await sc.runA1A2([VERSION], 1000)
 	t.arrayEqual(VERSION, protocol, 'Check protocol')
-	let channel = await sc.serverHandshake(message, serverSigKeyPair, serverEphKeyPair)
+	let channel = await sc.handshake(message, serverSigKeyPair, serverEphKeyPair)
 	let event = await channel.receive(1000)
 	t.arrayEqual(new Uint8Array(event.message), request, 'Check echo')
 	channel.send(true, request)
@@ -81,10 +79,10 @@ test('serverA1A2', async function (t) {
 		t.arrayEqual(expected, new Uint8Array(a2), 'Check A2')
 	}()
 
-	let sc = saltChannelSession(mockSocket, getNullTimeKeeper())
+	let sc = saltChannel.server(mockSocket, saltChannel.null_time_keeper())
 
 	const VERSION = [...'SCv2'].map(letter=>letter.charCodeAt(0))
-	await sc.serverRun([VERSION], 1000)
+	await sc.runA1A2([VERSION], 1000)
 	await clientPromise;
 
 	t.end();
