@@ -31,7 +31,7 @@ test('maxProts', async function (t) {
 	t.end();
 })
 test('nonInit', async function (t) {
-	const  expectedError = 'A1A2: Invalid internal state: a1a2'
+	const  expectedError = new Error('A1A2: Invalid internal state: a1a2')
 	let [mockSocket, testSocket] = misc.createMockSocket()
 	testSocket.setState(mockSocket.OPEN)
 	let[a2, expectedProtCount] = create1Prot()
@@ -45,7 +45,7 @@ test('nonInit', async function (t) {
 
 	let a1a2Promise = sc.a1a2()
 
-	t.throws(async function(){
+	misc.asyncThrows(t, async function(){
 		await sc.a1a2()
 	}, expectedError)
 
@@ -57,24 +57,24 @@ test('nonInit', async function (t) {
 })
 
 test('badPacketLength', async function (t) {
-	const expectedError = 'A2: Expected packet length 23 was 43'
-	t.throws(async function(){
+	const expectedError = new Error('A2: Expected packet length 23 was 43')
+	misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, createBadPacketLength)
 	}, expectedError)
 	t.end();
 })
 
 test('badPacketHeader1', async function (t) {
-	const expectedError  = 'A2: Bad packet header. Expected 9 128, was 0 128'
-	t.throws(async function(){
+	const expectedError = new Error('A2: Bad packet header. Expected 9 128, was 0 128')
+	misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, createBadPacketHeader1)
 	}, expectedError)
 	t.end();
 })
 
 test('badPacketHeader2', async function (t) {
-	const expectedError  = 'A2: Bad packet header. Expected 9 128, was 9 0'
-	t.throws(async function(){
+	const expectedError = new Error('A2: Bad packet header. Expected 9 128, was 9 0')
+	misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, createBadPacketHeader2)
 	}, expectedError)
 	t.end();
@@ -86,48 +86,48 @@ test('addressPub', async function (t) {
 })
 
 test('noSuchServer', async function (t) {
-	const expectedError  = 'A2: NoSuchServer exception'
-	t.throws(async function(){
+	const expectedError = new Error('A2: NoSuchServer exception')
+	misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1ZeroPub, createNoSuchServer, new Uint8Array(32))
 	}, expectedError)
 	t.end();
 })
 
 test('badAdressType', async function (t) {
-	const expectedError  = 'A1A2: Unsupported adress type: 2'
-	t.throws(async function(){
+	const expectedError = new Error('A1A2: Unsupported adress type: 2')
+	misc.asyncThrows(t, async function(){
 		await runTest(t, doNothing, doNothing, null)
 	}, expectedError)
 	t.end();
 })
 
 test('badCharInP1', async function (t) {
-	const expectedError  = 'A2: Invalid char in p1 " "'
-	t.throws(async function(){
+	const expectedError = new Error('A2: Invalid char in p1 " "')
+	misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, createBadCharInP1)
 	}, expectedError)
 	t.end();
 })
 
 test('badCharInP2', async function (t) {
-	const expectedError  = 'A2: Invalid char in p2 " "'
-	t.throws(async function(){
+	const expectedError = new Error('A2: Invalid char in p2 " "')
+	misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, createBadCharInP2)
 	}, expectedError)
 	t.end();
 })
 
 test('badCount1', async function (t) {
-	const expectedError  = 'A2: Count must be in range [1, 127], was: 0'
-	t.throws(async function(){
+	const expectedError = new Error('A2: Count must be in range [1, 127], was: 0')
+	misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, createBadCount1)
 	}, expectedError)
 	t.end();
 })
 
 test('badCount2', async function (t) {
-	const expectedError  = 'A2: Count must be in range [1, 127], was: 128'
-	t.throws(async function(){
+	const expectedError  = new Error('A2: Count must be in range [1, 127], was: 128')
+	misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, createBadCount2)
 	}, expectedError)
 	t.end();

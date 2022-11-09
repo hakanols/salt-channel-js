@@ -176,8 +176,8 @@ test('receiveBadEncryption', async function (t) {
 	testInterface.send(encrypted1)
 
 	
-	const errorMsg1 = 'EncryptedMessage: Could not decrypt message'   
-	t.throws(async function(){
+	const errorMsg1 = new Error('EncryptedMessage: Could not decrypt message')
+	misc.asyncThrows(t, async function(){
 		await channel.receive(1000)
 	}, errorMsg1)
 
@@ -186,8 +186,8 @@ test('receiveBadEncryption', async function (t) {
 	let encrypted2 = encrypt(testInterface.serverData, appPacket2)
 	testInterface.send(encrypted2)
 
-	const errorMsg2 = 'Received message when salt channel was not ready' 
-	t.throws(async function(){
+	const errorMsg2 = new Error('Received message when salt channel was not ready')
+	misc.asyncThrows(t, async function(){
 		await channel.receive(1000)
 	}, errorMsg2)
 
@@ -218,16 +218,16 @@ test('receiveDelayed', async function (t) {
 	let encrypted = encrypt(testInterface.serverData, appPacket)
 	testInterface.send(encrypted)
 
-	const errorMsg1 = '(Multi)AppPacket: Detected a delayed packet'
-	t.throws(async function(){
+	const errorMsg1 = new Error('(Multi)AppPacket: Detected a delayed packet')
+	misc.asyncThrows(t, async function(){
 		await channel.receive(1000)
 	}, errorMsg1)
 
 	console.log('## handShakeAfterError')
 	testInterface.serverData = createServerData();
 
-	const errorMsg2 = 'Handshake: Invalid internal state: closed'
-	t.throws(async function(){
+	const errorMsg2 = new Error('Handshake: Invalid internal state: closed')
+	misc.asyncThrows(t, async function(){
 		await sc.handshake(clientSigKeyPair, clientEphKeyPair)
 	}, errorMsg2)
 	
@@ -271,17 +271,17 @@ test('withBadServSigKey', async function (t) {
 	m2[1] = 129 // NoSuchServer & LastFlag
 	// Time is supported
 	m2[2] = 1
-	const expectedError = 'M2: NoSuchServer exception'
+	const expectedError = new Error('M2: NoSuchServer exception')
 	await testBadM2(t, m2,  new Uint8Array(32), expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderEnc1', async function (t) {
 	let [channel, testInterface] = await standardHandshake(t);
-	const expectedError = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 1 0' 
+	const expectedError = new Error('EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 1 0')
 	const badData = new Uint8Array([1, 0])
 	testInterface.send(createBadHeaderEnc(testInterface.serverData, badData))
-	t.throws(async function(){
+	misc.asyncThrows(t, async function(){
 		await channel.receive(1000)
 	}, expectedError)
 	t.end();
@@ -289,10 +289,10 @@ test('receiveBadHeaderEnc1', async function (t) {
 
 test('receiveBadHeaderEnc2', async function (t) {
 	let [channel, testInterface] = await standardHandshake(t);
-	const expectedError = 'EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 6 2'
+	const expectedError = new Error('EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was 6 2')
 	const badData = new Uint8Array([6, 2])
 	testInterface.send(createBadHeaderEnc(testInterface.serverData, badData))
-	t.throws(async function(){
+	misc.asyncThrows(t, async function(){
 		await channel.receive(1000)
 	}, expectedError)
 	t.end();
@@ -300,10 +300,10 @@ test('receiveBadHeaderEnc2', async function (t) {
 
 test('receiveBadHeaderApp1', async function (t) {
 	let [channel, testInterface] = await standardHandshake(t);
-	const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 0 0'
+	const expectedError = new Error('(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 0 0')
 	const badData = new Uint8Array([0, 0])
 	testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
-	t.throws(async function(){
+	misc.asyncThrows(t, async function(){
 		await channel.receive(1000)
 	}, expectedError)
 	t.end();
@@ -311,10 +311,10 @@ test('receiveBadHeaderApp1', async function (t) {
 
 test('receiveBadHeaderApp2', async function (t) {
 	let [channel, testInterface] = await standardHandshake(t);
-	const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 5 1'
+	const expectedError = new Error('(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 5 1')
 	const badData = new Uint8Array([5, 1])
 	testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
-	t.throws(async function(){
+	misc.asyncThrows(t, async function(){
 		await channel.receive(1000)
 	}, expectedError)
 	t.end();
@@ -322,17 +322,17 @@ test('receiveBadHeaderApp2', async function (t) {
 
 test('receiveBadHeaderApp3', async function (t) {
 	let [channel, testInterface] = await standardHandshake(t);
-	const expectedError = '(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 11 1'
+	const expectedError = new Error('(Multi)AppPacket: Bad packet header. Expected 5 0 or 11 0, was 11 1')
 	const badData = new Uint8Array([11, 1])
 	testInterface.send(createBadHeaderApp(testInterface.serverData, badData))
-	t.throws(async function(){
+	misc.asyncThrows(t, async function(){
 		await channel.receive(1000)
 	}, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderM21', async function (t) {
-	const expectedError = 'M2: Bad packet header. Expected 2 0 or 2 129, was 3 0'
+	const expectedError = new Error('M2: Bad packet header. Expected 2 0 or 2 129, was 3 0')
 	const badData = new Uint8Array([3, 0])
 	const m2 = createBadM2(badData)
 	await testBadM2(t, m2, undefined, expectedError)
@@ -340,7 +340,7 @@ test('receiveBadHeaderM21', async function (t) {
 });
 
 test('receiveBadHeaderM22', async function (t) {
-	const expectedError = 'M2: Bad packet header. Expected 2 0 or 2 129, was 2 50'
+	const expectedError = new Error('M2: Bad packet header. Expected 2 0 or 2 129, was 2 50')
 	const badData = new Uint8Array([2, 50])
 	const m2 = createBadM2(badData)
 	await testBadM2(t, m2, undefined, expectedError)
@@ -348,7 +348,7 @@ test('receiveBadHeaderM22', async function (t) {
 });
 
 test('receiveBadTimeM2', async function (t) {
-	const expectedError = 'M2: Invalid time value 20'
+	const expectedError = new Error('M2: Invalid time value 20')
 	const badData = new Uint8Array([2, 0, 20])
 	const m2 = createBadM2(badData)
 	await testBadM2(t, m2, undefined, expectedError)
@@ -356,35 +356,35 @@ test('receiveBadTimeM2', async function (t) {
 });
 
 test('receiveBadHeaderM31', async function (t) {
-	const expectedError = 'M3: Bad packet header. Expected 3 0, was 0 0'
+	const expectedError = new Error('M3: Bad packet header. Expected 3 0, was 0 0')
 	const badData = new Uint8Array([0, 0])
 	await testBadM3(t, badData, undefined, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderM32', async function (t) {
-	const expectedError = 'M3: Bad packet header. Expected 3 0, was 3 1'
+	const expectedError = new Error('M3: Bad packet header. Expected 3 0, was 3 1')
 	const badData = new Uint8Array([3, 1])
 	await testBadM3(t, badData, undefined, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderM33', async function (t) {
-	const expectedError = 'M3: ServerSigKey does not match expected'
+	const expectedError = new Error('M3: ServerSigKey does not match expected')
 	const badData = new Uint8Array([3, 0, 20, 0, 0, 0, 12, 23, 34, 56])
 	await testBadM3(t, badData, serverSigKeyPair.publicKey, expectedError)
 	t.end();
 });
 
 test('receiveBadHeaderM34', async function (t) {
-	const expectedError = 'M3: Could not verify signature'
+	const expectedError = new Error('M3: Could not verify signature')
 	const badData = new Uint8Array([3, 0, 20, 0, 0, 0, 12, 23, 34, 56])
 	await testBadM3(t, badData, undefined, expectedError)
 	t.end();
 });
 
 test('receiveBadPubEph', async function (t) {
-	const expectedError = 'EncryptedMessage: Could not decrypt message'
+	const expectedError = new Error('EncryptedMessage: Could not decrypt message')
 
 	let [mockSocketInterface, testInterface] = misc.createMockSocket()
 	testInterface.setState(mockSocketInterface.OPEN)
@@ -399,7 +399,7 @@ test('receiveBadPubEph', async function (t) {
 		testInterface.send(createM3(testInterface.serverData))
 	}()
 
-	t.throws(async function(){
+	misc.asyncThrows(t, async function(){
 		await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined)
 	}, expectedError)
 
@@ -772,7 +772,7 @@ async function testBadM2(t, m2, sigKey, expectedError){
 		testInterface.send(m2)
 	}()
 
-	t.throws(async function(){
+	misc.asyncThrows(t, async function(){
 		await sc.handshake(clientSigKeyPair, clientEphKeyPair, sigKey)
 	}, expectedError)
 
@@ -799,7 +799,7 @@ async function testBadM3(t, badData, sigKey, expectedError){
 		testInterface.send(m3)
 	}()
 
-	t.throws(async function(){
+	misc.asyncThrows(t, async function(){
 		await sc.handshake(clientSigKeyPair, clientEphKeyPair, sigKey)
 	}, expectedError)
 

@@ -155,10 +155,10 @@ class Tester {
     this._next()
   }
 
-  doesNotThrow (fn, message = 'should not throw') {
+  async doesNotThrow (fn, message = 'should not throw') {
     var actual = undefined
     try {
-      fn()
+      await fn()
     } catch (err) {
       actual = err
     }
@@ -202,7 +202,7 @@ function fail (message, info) {
   out(`  ...`)
 }
 
-function run () {
+async function run () {
   if (complete) return
   var tester = testers.shift()
   if (tester) {
@@ -210,7 +210,7 @@ function run () {
       out(`TAP version 13`)
     }
     out(`# ${tester.name}`)
-    tester.test(tester)
+    await tester.test(tester)
   } else {
     complete = true
     var total = passed + failed

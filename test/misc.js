@@ -48,3 +48,19 @@ export function createMockSocket(){
 
 	return [ mockSocketInterface, testInterface ]
 }
+
+export async function asyncThrows(t, fn, excpected, message='Should throw'){
+    try {
+        await fn()
+    }
+    catch (err) {
+        if (excpected===undefined){
+            t.pass('throws '+  message)
+        }
+        else {
+            t.equal(excpected.message, err.message, message)
+        }
+        return
+    }
+    t.fail('throws did not hapen '+message)
+}
