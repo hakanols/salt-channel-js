@@ -348,7 +348,7 @@ test('receiveBadHeaderM22', async function (t) {
 });
 
 test('receiveBadTimeM2', async function (t) {
-	const expectedError = new Error('M2: Invalid time value 20')
+	const expectedError = new Error('M2: Invalid time value 20') // ToDo Time out 
 	const badData = new Uint8Array([2, 0, 20])
 	const m2 = createBadM2(badData)
 	await testBadM2(t, m2, undefined, expectedError)

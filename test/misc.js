@@ -58,7 +58,7 @@ export async function asyncThrows(t, fn, excpected, message='Should throw'){
             t.pass('throws '+  message)
         }
         else {
-            t.equal(excpected.message, err.message, message)
+            t.equal(err.message, excpected.message, message)
         }
         return
     }

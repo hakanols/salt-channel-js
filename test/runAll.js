@@ -1,4 +1,4 @@
-import * as a1a2 from './a1a2test.js';
-import * as handshake from './handshaketest.js';
-import * as session from './sessiontest.js';
-import * as server from './servertest.js';
+import './a1a2test.js';
+import './handshaketest.js';
+import './sessiontest.js';
+import './servertest.js';
