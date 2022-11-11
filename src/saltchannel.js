@@ -138,10 +138,16 @@ export function asyncSocket(webSocket){
 		}
 	}
 	
-	async function receiveData(waitTime){
+	async function excpectData(waitTime){
 		let event = await receive(waitTime)
 		if (event.type == DATA_EVENT){
 			return event.data
+		}
+		else if (event.type == TIMEOUT_EVENT){
+			throw new Error("Timout waiting for data")
+		}
+		else {
+			throw new Error("Other event then data was received: "+ event.type)
 		}
 	}
 	
@@ -163,7 +169,7 @@ export function asyncSocket(webSocket){
 		close: close,
 		send: send,
 		receive: receive,
-		receiveData: receiveData,
+		excpectData: excpectData,
 		TIMEOUT_EVENT: TIMEOUT_EVENT,
 		CLOSE_EVENT: CLOSE_EVENT,
 		DATA_EVENT: DATA_EVENT
@@ -178,7 +184,7 @@ function decrypt(message, storage) {
 	} else if (validHeader(message, PacketTypeEncrypted, 128)) {
 		last = true
 	} else {
-		closeAndThrow('EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was '
+		throw new Error('EncryptedMessage: Bad packet header. Expected 6 0 or 6 128, was '
 			+ message[0] + ' ' + message[1])
 	}
 
@@ -186,7 +192,7 @@ function decrypt(message, storage) {
 	let clear = nacl.secretbox.open(bytes, storage.theirNonce, storage.sessionKey)
 
 	if (!clear) {
-		closeAndThrow('EncryptedMessage: Could not decrypt message')
+		throw new Error('EncryptedMessage: Could not decrypt message')
 	}
 	
 	storage.theirNonce = increaseNonce2(storage.theirNonce)
@@ -313,11 +319,11 @@ function createNonce(startValue){
 
 function increaseNonce(nonce) {
 	if (!(nonce instanceof Uint8Array)) {
-		closeAndThrow('Expected Uint8Array. \n\t' +
+		throw new Error('Expected Uint8Array. \n\t' +
 					'Input: ' + nonce)
 	}
 	if (!(nonce.length === nacl.secretbox.nonceLength)) {
-		closeAndThrow('Unexpected nonce length. \n\t' +
+		throw new Error('Unexpected nonce length. \n\t' +
 					'Length: ' + nonce.length)
 	}
 	nonce[0] += 1 // nonces are little endian
@@ -339,21 +345,21 @@ function increaseNonce2(nonce) {
 
 function handleM1(m1){
 	if (6 >= m1.length){
-		closeAndThrow('M1 Length: To short massage. Length is '+ m1.length)
+		throw new Error('M1 Length: To short massage. Length is '+ m1.length)
 	} 
 	if(!util.bufferEquals(m1.slice(0, 4), VERSION)){
-		closeAndThrow('M1 Version: ' +m1.slice(0, 4) + ' Expected: ' + VERSION)
+		throw new Error('M1 Version: ' +m1.slice(0, 4) + ' Expected: ' + VERSION)
 	}
 	if (m1[4] != PacketTypeM1){
-		closeAndThrow('M1 Header: ' + m1[4] + ' Expected: ' + PacketTypeM1)
+		throw new Error('M1 Header: ' + m1[4] + ' Expected: ' + PacketTypeM1)
 	}
 	if (!(m1[5] in [0, 1] )){
-		closeAndThrow('M1 Header: ' + m1[5] + ' Expected: 0 or 1')
+		throw new Error('M1 Header: ' + m1[5] + ' Expected: 0 or 1')
 	}
 	let expectedServKey = (m1[5] == 1)
 	let expectedLength = 42 + (expectedServKey ? 0 : 32)
 	if( m1.length == expectedLength){
-		closeAndThrow('M1: Check packet length:' + m1.length)
+		throw new Error('M1: Check packet length:' + m1.length)
 	}
 
 	let time = getInt32(m1.slice(6, 10))
@@ -396,12 +402,12 @@ function handleM4(encryptedM4, storage, m1Hash, m2Hash, timeChecker) {
 	let m4 = decrypt(new Uint8Array(encryptedM4), storage).message
 
 	if(!util.bufferEquals(m4.slice(0, 2), [PacketTypeM4, 0])){
-		closeAndThrow('M4: Check header: ' +m4.slice(0, 2) + ' Expected: ' + [PacketTypeM4, 0])
+		throw new Error('M4: Check header: ' +m4.slice(0, 2) + ' Expected: ' + [PacketTypeM4, 0])
 	}
 
 	let time = getInt32(m4.slice(2,6))
 	if (timeChecker.delayed(time)){
-		closeAndThrow('M4: Check time to be set: ' +util.ab2hex(time))
+		throw new Error('M4: Check time to be set: ' +util.ab2hex(time))
 	}
 
 	let clientSigKey = m4.slice(6,38)
@@ -409,7 +415,7 @@ function handleM4(encryptedM4, storage, m1Hash, m2Hash, timeChecker) {
 	let concat = new Uint8Array([...SIG_STR2_BYTES, ...m1Hash, ...m2Hash])
 	let success = nacl.sign.detached.verify(concat, signature, clientSigKey)
 	if (!success){
-		closeAndThrow('M4: Could not verify signature')
+		throw new Error('M4: Could not verify signature')
 	} 
 	return clientSigKey
 }
@@ -446,22 +452,22 @@ function createA1(address) {
 
 function handleA2(a2) {
 	if (a2[0] != PacketTypeA2) {
-		closeAndThrow('A2: Bad packet header. Message type was: '+a2[0])
+		throw new Error('A2: Bad packet header. Message type was: '+a2[0])
 	}
 	if (a2[1] != 128) {
 		if (a2[1] == 129) {
-			closeAndThrow('A2: NoSuchServer exception')
+			throw new Error('A2: NoSuchServer exception')
 		}
 		else {
-			closeAndThrow('A2: Bad packet header. Message info was: '+a2[1])
+			throw new Error('A2: Unsupported adress type: '+a2[1])
 		}	
 	}
 	let count = a2[2]
 	if (count < 1 || count > 127) {
-		closeAndThrow('A2: Count must be in range [1, 127], was: ' + count)
+		throw new Error('A2: Count must be in range [1, 127], was: ' + count)
 	}
 	if (a2.length !== count*20 + 3) {
-		closeAndThrow('A2: Expected packet length ' + (count*20 + 3) +
+		throw new Error('A2: Expected packet length ' + (count*20 + 3) +
 			' was ' + a2.length)
 	}
 	let prots = []
@@ -470,12 +476,12 @@ function handleA2(a2) {
 		let p2 = a2.slice(i*20+13,i*20+23)
 		for (let byte of p1){
 			if (!validPStringChar(byte)) {
-				closeAndThrow('A2: Invalid char in p1 "' + byte + '"')
+				throw new Error('A2: Invalid char in p1 "' + byte + '"')
 			}
 		}
 		for (let byte of p2){
 			if (!validPStringChar(byte)) {
-				closeAndThrow('A2: Invalid char in p2 "' + byte + '"')
+				throw new Error('A2: Invalid char in p2 "' + byte + '"')
 			}
 		}
 		prots[i] = {
@@ -526,20 +532,20 @@ function serverA1A2(protocols, message){
 		return a2
 	}
 	else {
-		closeAndThrow('A1 with key request is not suported. Message: '+ message)
+		throw new Error('A1 with key request is not suported. Message: '+ message)
 	}
 }
 
 function handleMessage(bytes, storage, timeChecker) {
 	let clear = decrypt(bytes, storage)
 	if (!clear) {
-		closeAndThrow('Could not decrypt')
+		throw new Error('Could not decrypt')
 	}
 	let rawMessage = clear.message;
 
 	let time = getInt32(rawMessage.slice(2, 6))
 	if (timeChecker.delayed(time)) {
-		closeAndThrow('(Multi)AppPacket: Detected a delayed packet')
+		throw new Error('(Multi)AppPacket: Detected a delayed packet')
 	}
 
 	let messages
@@ -548,7 +554,7 @@ function handleMessage(bytes, storage, timeChecker) {
 	} else if (validHeader(rawMessage, PacketTypeMultiApp, 0)) {
 		messages = handleMultiAppPacket(rawMessage)
 	} else {
-		closeAndThrow('(Multi)AppPacket: Bad packet header. ' +
+		throw new Error('(Multi)AppPacket: Bad packet header. ' +
 		'Expected 5 0 or 11 0, was ' + rawMessage[0] + ' ' + rawMessage[1])
 	}
 	return {
@@ -561,18 +567,18 @@ function handleMultiAppPacket(multiAppPacket) {
 	let count = getUint16(multiAppPacket.slice(6, 8))
 
 	if (count === 0) {
-		closeAndThrow('MultiAppPacket: Zero application messages')
+		throw new Error('MultiAppPacket: Zero application messages')
 	}
 
 	let buffer = multiAppPacket.slice(8)
 	let messages = []
 	for (let i = 0; i < count; i++) {
 		if (buffer.length < 2) {
-			closeAndThrow('MultiAppPacket: Message missing length field')
+			throw new Error('MultiAppPacket: Message missing length field')
 		}
 		let length = getUint16(buffer.slice(0, 2))
 		if (buffer.length < 2+length) {
-			closeAndThrow('MultiAppPacket: Incomplete message')
+			throw new Error('MultiAppPacket: Incomplete message')
 		}
 		let data = buffer.slice(2, 2+length)
 		messages.push(data);
@@ -650,16 +656,16 @@ function handleM2(m2, timeChecker) {
 	if (validHeader(m2, PacketTypeM2, 0)) {
 
 	} else if (validHeader(m2, 2, 129)) {
-		closeAndThrow('M2: NoSuchServer exception')
+		throw new Error('M2: NoSuchServer exception')
 	} else {
-		closeAndThrow('M2: Bad packet header. Expected 2 0 or 2 129, was '
+		throw new Error('M2: Bad packet header. Expected 2 0 or 2 129, was '
 			+ m2[0] + ' ' + m2[1])
 	}
 
 	// Time
 	let time = getInt32(m2.slice(2, 6))
 	if (timeChecker.delayed(time)) {
-		closeAndThrow('M2: Detected delayed packet')
+		throw new Error('M2: Detected delayed packet')
 	}
 
 	let serverPub = m2.slice(6, 38)
@@ -669,18 +675,18 @@ function handleM2(m2, timeChecker) {
 function handleM3(rawM3, storage, m1Hash, m2Hash, timeChecker) {
 	let m3 = decrypt(rawM3, storage).message
 	if (!m3) {
-		closeAndThrow('EncryptedMessage: Could not decrypt message')
+		throw new Error('EncryptedMessage: Could not decrypt message')
 	}
 	// Header
 	if (!validHeader(m3, PacketTypeM3, 0)) {
-		closeAndThrow('M3: Bad packet header. Expected 3 0, was ' +
+		throw new Error('M3: Bad packet header. Expected 3 0, was ' +
 			m3[0] + ' ' + m3[1])
 	}
 
 	// Time
 	let time = getInt32(m3.slice(2, 6))
 	if (timeChecker.delayed(time)) {
-		closeAndThrow('M3: Detected delayed packet')
+		throw new Error('M3: Detected delayed packet')
 	}
 
 	let serverPub = m3.slice(6, 38)
@@ -689,7 +695,7 @@ function handleM3(rawM3, storage, m1Hash, m2Hash, timeChecker) {
 	let signature = m3.slice(38, 102)
 	let success = nacl.sign.detached.verify(fingerprint, signature, serverPub)
 	if (!success) {
-		closeAndThrow('M3: Could not verify signature')
+		throw new Error('M3: Could not verify signature')
 	}
 
 	return serverPub
@@ -713,12 +719,6 @@ function createM4(storage, signKeyPair, m1Hash, m2Hash, timeKeeper) {
 	return encrypted
 }
 
-function closeAndThrow(msg){
-	/*saltState = STATE_ERR
-	close()*/
-	throw new Error(msg)
-}
-
 export function client (webSocket, timeKeeper, timeChecker) {
 	timeKeeper = (timeKeeper === undefined) ? typical_time_keeper(util.currentTimeMs) : timeKeeper;
 	timeChecker = (timeChecker === undefined) ? typical_time_checker(util.currentTimeMs) : timeChecker;
@@ -739,48 +739,58 @@ export function client (webSocket, timeKeeper, timeChecker) {
 	}
 
 	async function receive(waitTime){
-		let message = messageQueue.shift();
-		if (message == undefined){
-			if (saltState !== STATE_READY) {
-				closeAndThrow('Invalid state: ' + saltState)
-			}
-			const event = await socket.receive(waitTime);
-			if (event.type == socket.DATA_EVENT){
-				let data = handleMessage(event.data, storage, timeChecker)
-				if (data.last){
-					saltState = STATE_LAST
+		try{
+			let message = messageQueue.shift();
+			if (message == undefined){
+				if (saltState !== STATE_READY) {
+					throw new Error('Invalid state: ' + saltState)
 				}
-				messageQueue.push( ...data.messages )
-				message = messageQueue.shift()
+				const event = await socket.receive(waitTime);
+				if (event.type == socket.DATA_EVENT){
+					let data = handleMessage(event.data, storage, timeChecker)
+					if (data.last){
+						saltState = STATE_LAST
+					}
+					messageQueue.push( ...data.messages )
+					message = messageQueue.shift()
+				}
+			}
+			if (messageQueue.length == 0 && saltState == STATE_LAST){
+				close()
+			}
+			return {
+				message: message.buffer, // ToDo What if message is undefined
+				close: saltState == STATE_CLOSED
 			}
 		}
-		if (messageQueue.length == 0 && saltState == STATE_LAST){
-			close()
-		}
-		return {
-			message: message.buffer, // ToDo What if message is undefined
-			close: saltState == STATE_CLOSED
+		catch (err){
+			closeAndThrow(err)
 		}
 	}
 
 	function send(last){
-		if (saltState !== STATE_READY) {
-			closeAndThrow('Invalid state: ' + saltState)
-		}
-		if (last) {
-			saltState = STATE_LAST
-		}
+		try{
+			if (saltState !== STATE_READY) {
+				throw new Error('Invalid state: ' + saltState)
+			}
+			if (last) {
+				saltState = STATE_LAST
+			}
 
-		let messages = extactMessages(Array.from(arguments))
-		messages = validateAndFix(messages)
-		if (messages.length === 1) {
-			socket.send( sendAppPacket(last, messages[0], storage, timeKeeper))
-		} else {
-			socket.send( sendMultiAppPacket(last, messages, storage, timeKeeper))
-		}
+			let messages = extactMessages(Array.from(arguments))
+			messages = validateAndFix(messages)
+			if (messages.length === 1) {
+				socket.send( sendAppPacket(last, messages[0], storage, timeKeeper))
+			} else {
+				socket.send( sendMultiAppPacket(last, messages, storage, timeKeeper))
+			}
 
-		if (last) {
-			close()
+			if (last) {
+				close()
+			}
+		}
+		catch (err){
+			closeAndThrow(err)
 		}
 	}
 
@@ -796,52 +806,68 @@ export function client (webSocket, timeKeeper, timeChecker) {
 		}
 	}
 
+	function closeAndThrow(err){
+		close()
+		saltState = STATE_ERR
+		throw err
+	}
+
 	async function a1a2(adress) {
-		if (saltState !== STATE_INIT) {
-			throw new Error('A1A2: Invalid internal state: ' + saltState)
+		try{
+			if (saltState !== STATE_INIT) {
+				throw new Error('A1A2: Invalid internal state: ' + saltState)
+			}
+			saltState = STATE_A1A2
+			let a1 = createA1(adress)
+			socket.send(a1)
+			let a2 = await socket.excpectData(1000)
+			saltState = STATE_INIT	
+			return handleA2(a2)	
 		}
-		saltState = STATE_A1A2
-		let a1 = createA1(adress)
-		socket.send(a1)
-		let a2 = await socket.receiveData(1000)
-		saltState = STATE_INIT
-		return handleA2(a2)
+		catch (err){
+			closeAndThrow(err)
+		}
 	}
 
 	async function handshake(sigKeyPair, ephKeyPair, hostSigPub) {
-		verifySigKeyPair(sigKeyPair)
-		verifyEphKeyPair(ephKeyPair)
-		verifyHostSigPub(hostSigPub)
-		if (saltState !== STATE_INIT) {
-			closeAndThrow('Handshake: Invalid internal state: ' + saltState)
+		try{			
+			if (saltState !== STATE_INIT) {
+				throw new Error('Handshake: Invalid internal state: ' + saltState)
+			}
+			saltState = STATE_HAND
+
+			verifySigKeyPair(sigKeyPair)
+			verifyEphKeyPair(ephKeyPair)
+			verifyHostSigPub(hostSigPub)
+
+			let m1 = createM1(ephKeyPair.publicKey, hostSigPub, timeKeeper)
+			socket.send(m1)
+			let m2 = await socket.excpectData(1000)
+			let serverPub = handleM2(m2, timeChecker)
+
+			let m1Hash = nacl.hash(m1)
+			let m2Hash = nacl.hash(m2)
+			storage.sessionKey = nacl.box.before(serverPub, ephKeyPair.secretKey)
+
+			let m3 = await socket.excpectData(1000)
+			let serverSigPub = handleM3(m3, storage, m1Hash, m2Hash, timeChecker)
+			if (hostSigPub !== undefined && !util.uint8ArrayEquals(serverSigPub, hostSigPub)) {
+				throw new Error('Handshake: ServerSigKey does not match expected')
+			}
+			let m4 = createM4(storage, sigKeyPair, m1Hash, m2Hash, timeKeeper)
+			socket.send(m4)
+			
+			saltState = STATE_READY
+			return {
+				close: close,
+				send: send,
+				receive: receive,
+				getState: getState,
+				serverSigPub: serverSigPub
+			}
 		}
-		saltState = STATE_HAND
-
-		let m1 = createM1(ephKeyPair.publicKey, hostSigPub, timeKeeper)
-		socket.send(m1)
-		let m2 = await socket.receiveData(1000)
-		let serverPub = handleM2(m2, timeChecker)
-
-		let m1Hash = nacl.hash(m1)
-		let m2Hash = nacl.hash(m2)
-		storage.sessionKey = nacl.box.before(serverPub, ephKeyPair.secretKey)
-
-		let m3 = await socket.receiveData(1000)
-		let serverSigPub = handleM3(m3, storage, m1Hash, m2Hash, timeChecker)
-		if (hostSigPub !== undefined && !util.uint8ArrayEquals(serverSigPub, hostSigPub)) {
-			closeAndThrow('M3: ServerSigKey does not match expected')
-		}
-		let m4 = createM4(storage, sigKeyPair, m1Hash, m2Hash, timeKeeper)
-		socket.send(m4)
-		
-		saltState = STATE_READY
-
-		return {
-			close: close,
-			send: send,
-			receive: receive,
-			getState: getState,
-			serverSigPub: serverSigPub
+		catch (err){
+			closeAndThrow(err)
 		}
 	}
 
@@ -871,48 +897,58 @@ export function server(webSocket, timeKeeper, timeChecker) {
 	}
 
 	async function receive(waitTime){
-		let message = messageQueue.shift();
-		if (message == undefined){
-			if (saltState !== STATE_READY) {
-				closeAndThrow('Invalid state: ' + saltState)
-			}
-			const event = await socket.receive(waitTime);
-			if (event.type == socket.DATA_EVENT){
-				let data = handleMessage(event.data, storage, timeChecker)
-				if (data.last){
-					saltState = STATE_LAST
+		try{
+			let message = messageQueue.shift();
+			if (message == undefined){
+				if (saltState !== STATE_READY) {
+					throw new Error('Invalid state: ' + saltState)
 				}
-				messageQueue.push( ...data.messages )
-				message = messageQueue.shift()
+				const event = await socket.receive(waitTime);
+				if (event.type == socket.DATA_EVENT){
+					let data = handleMessage(event.data, storage, timeChecker)
+					if (data.last){
+						saltState = STATE_LAST
+					}
+					messageQueue.push( ...data.messages )
+					message = messageQueue.shift()
+				}
+			}
+			if (messageQueue.length == 0 && saltState == STATE_LAST){
+				close()
+			}
+			return {
+				message: message.buffer, // ToDo What if message is undefined
+				close: saltState == STATE_CLOSED
 			}
 		}
-		if (messageQueue.length == 0 && saltState == STATE_LAST){
-			close()
-		}
-		return {
-			message: message.buffer, // ToDo What if message is undefined
-			close: saltState == STATE_CLOSED
+		catch (err){
+			closeAndThrow(err)
 		}
 	}
 
 	function send(last){
-		if (saltState !== STATE_READY) {
-			closeAndThrow('Invalid state: ' + saltState)
-		}
-		if (last) {
-			saltState = STATE_LAST
-		}
+		try{
+			if (saltState !== STATE_READY) {
+				throw new Error('Invalid state: ' + saltState)
+			}
+			if (last) {
+				saltState = STATE_LAST
+			}
 
-		let messages = extactMessages(Array.from(arguments))
-		messages = validateAndFix(messages)
-		if (messages.length === 1) {
-			socket.send( sendAppPacket(last, messages[0], storage, timeKeeper))
-		} else {
-			socket.send( sendMultiAppPacket(last, messages, storage, timeKeeper))
-		}
+			let messages = extactMessages(Array.from(arguments))
+			messages = validateAndFix(messages)
+			if (messages.length === 1) {
+				socket.send( sendAppPacket(last, messages[0], storage, timeKeeper))
+			} else {
+				socket.send( sendMultiAppPacket(last, messages, storage, timeKeeper))
+			}
 
-		if (last) {
-			close()
+			if (last) {
+				close()
+			}
+		}
+		catch (err){
+			closeAndThrow(err)
 		}
 	}
 
@@ -928,70 +964,85 @@ export function server(webSocket, timeKeeper, timeChecker) {
 		}
 	}
 
-	async function runA1A2(protocols, waitTime) {
-		if (saltState !== STATE_INIT) {
-			closeAndThrow('Handshake: Invalid internal state: ' + saltState)
-		}
-		saltState = STATE_A1A2
+	function closeAndThrow(err){
+		close()
+		saltState = STATE_ERR
+		throw err
+	}
 
-		let message = await socket.receiveData(waitTime)
-		if(message == null){ // No message
-			return
-		}
-		else if (util.bufferEquals(message.slice(0, 2), [PacketTypeA1, 0])){ // Is A1
-			socket.send( serverA1A2(protocols, message) )
-			saltState = STATE_INIT
-			return {
-				protocol: "A1",
-				message: ""
+	async function runA1A2(protocols, waitTime) {
+		try{
+			if (saltState !== STATE_INIT) {
+				throw new Error('Handshake: Invalid internal state: ' + saltState)
 			}
-		}
-		else {
-			for (let i = 0; i < protocols.length; i++) {
-				let protocol = protocols[i]
-				if (checkProtocol(protocol, message)){
-					saltState = STATE_INIT
-					return {
-						protocol: protocol,
-						message: message
-					}
+			saltState = STATE_A1A2
+
+			let message = await socket.excpectData(waitTime)
+			if(message == null){ // No message
+				return
+			}
+			else if (util.bufferEquals(message.slice(0, 2), [PacketTypeA1, 0])){ // Is A1
+				socket.send( serverA1A2(protocols, message) )
+				saltState = STATE_INIT
+				return {
+					protocol: "A1",
+					message: ""
 				}
 			}
-			closeAndThrow('Unknown protocol '+ message)
+			else {
+				for (let i = 0; i < protocols.length; i++) {
+					let protocol = protocols[i]
+					if (checkProtocol(protocol, message)){
+						saltState = STATE_INIT
+						return {
+							protocol: protocol,
+							message: message
+						}
+					}
+				}
+				throw new Error('Unknown protocol '+ message)
+			}
+		}
+		catch (err){
+			closeAndThrow(err)
 		}
 	}
 
 	async function handshake(m1, sigKeyPair, ephKeyPair) {
-		verifySigKeyPair(sigKeyPair)
-		verifyEphKeyPair(ephKeyPair)
-		if (saltState !== STATE_INIT) {
-			closeAndThrow('Handshake: Invalid internal state: ' + saltState)
+		try {
+			verifySigKeyPair(sigKeyPair)
+			verifyEphKeyPair(ephKeyPair)
+			if (saltState !== STATE_INIT) {
+				throw new Error('Handshake: Invalid internal state: ' + saltState)
+			}
+			saltState = STATE_HAND
+			let m1Return = handleM1(m1)
+			if (!(m1Return.serverSigKey != null && !util.bufferEquals(m1Return.serverSigKey, sigKeyPair.publicKey))) {
+				throw new Error('Handshake: Client try to to connect to missing singKeyPair')
+			}
+			let m2 = createM2(ephKeyPair.publicKey, timeKeeper)
+
+			let m1Hash = nacl.hash(m1)
+			let m2Hash = nacl.hash(m2)
+			storage.sessionKey = nacl.box.before(m1Return.publicEphemeral, ephKeyPair.secretKey)
+
+			let m3 = createM3(sigKeyPair, storage, m1Hash, m2Hash, timeKeeper)
+			socket.send(m2)
+			socket.send(m3)
+			let m4 = await socket.excpectData(1000)
+			let clientSigPub = handleM4(m4, storage, m1Hash, m2Hash, timeChecker)
+			
+			saltState = STATE_READY
+			return {
+				close: close,
+				send: send,
+				receive: receive,
+				getState: getState,
+				clientSigPub: clientSigPub
+			}
 		}
-		saltState = STATE_HAND
-		let m1Return = handleM1(m1)
-		if (!(m1Return.serverSigKey != null && !util.bufferEquals(m1Return.serverSigKey, sigKeyPair.publicKey))) {
-			closeAndThrow('Handshake: Invalid internal state: ' + saltState)
-		}
-		let m2 = createM2(ephKeyPair.publicKey, timeKeeper)
-
-		let m1Hash = nacl.hash(m1)
-		let m2Hash = nacl.hash(m2)
-		storage.sessionKey = nacl.box.before(m1Return.publicEphemeral, ephKeyPair.secretKey)
-
-		let m3 = createM3(sigKeyPair, storage, m1Hash, m2Hash, timeKeeper)
-		socket.send(m2)
-		socket.send(m3)
-		let m4 = await socket.receiveData(1000)
-		let clientSigPub = handleM4(m4, storage, m1Hash, m2Hash, timeChecker)
-		
-		saltState = STATE_READY
-
-		return {
-			close: close,
-			send: send,
-			receive: receive,
-			getState: getState,
-			clientSigPub: clientSigPub
+		catch (err){
+			closeAndThrow(err)
 		}
 	}
 

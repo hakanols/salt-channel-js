@@ -370,7 +370,7 @@ test('receiveBadHeaderM32', async function (t) {
 });
 
 test('receiveBadHeaderM33', async function (t) {
-	const expectedError = new Error('M3: ServerSigKey does not match expected')
+	const expectedError = new Error('M3: Could not verify signature')
 	const badData = new Uint8Array([3, 0, 20, 0, 0, 0, 12, 23, 34, 56])
 	await testBadM3(t, badData, serverSigKeyPair.publicKey, expectedError)
 	t.end();
@@ -411,7 +411,7 @@ test('receiveBadPubEph', async function (t) {
 // ==================================================================
 // ==================================================================
 // =================== SERVER SIDE HANDSHAKE CODE ===================
-// ============================ (sorta) =============================
+// ==================================================================
 
 function numberTo8Array(number){
 	let array = new Int16Array([number])

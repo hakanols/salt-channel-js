@@ -17,17 +17,51 @@ const LastFlag = 128
 //////////////////////////////////////////////////
 
 test('oneProt', async function (t) {
-	let sc = await runTest(t, validateA1Any, create1Prot)
+	let [a2, expectedProtCount] = create1Prot()
+	await runTest(t, validateA1Any, a2, expectedProtCount)
 	t.end();
 })
 
 test('twoProts', async function (t) {
-	await runTest(t, validateA1Any, create2Prots)
+	const expectedProtCount = 2
+
+	const p11 = [...'SCv2------'].map(letter=>letter.charCodeAt(0))
+	const p12 = [...'-._AZaz9--'].map(letter=>letter.charCodeAt(0))
+	const p21 = [...'SCv3------'].map(letter=>letter.charCodeAt(0))
+	const p22 = [...'unicorns--'].map(letter=>letter.charCodeAt(0))
+	let a2 = new Uint8Array([
+		PacketTypeA2,
+		LastFlag,
+		expectedProtCount,
+		...p11,
+		...p12,
+		...p21,
+		...p22
+	])
+	await runTest(t, validateA1Any, a2, expectedProtCount)
 	t.end();
 })
 
 test('maxProts', async function (t) {
-	await runTest(t, validateA1Any, create127Prots)
+
+	const expectedProtCount = 127
+
+	const p1 = [...'SCv2------'].map(letter=>letter.charCodeAt(0))
+	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
+	let a2 = new Uint8Array([
+		PacketTypeA2,
+		LastFlag,
+		expectedProtCount,
+	])
+	for (let i = 0; i < expectedProtCount; i++) {
+		a2 = new Uint8Array([
+			...a2,
+			...p1,
+			...p2
+		])
+	}
+
+	await runTest(t, validateA1Any, a2, expectedProtCount)
 	t.end();
 })
 test('nonInit', async function (t) {
@@ -58,87 +92,174 @@ test('nonInit', async function (t) {
 
 test('badPacketLength', async function (t) {
 	const expectedError = new Error('A2: Expected packet length 23 was 43')
+	const expectedProtCount = 1
+
+	const p1 = [...'SCc2------'].map(letter=>letter.charCodeAt(0))
+	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
+	let a2 = new Uint8Array([
+		PacketTypeA2,
+		LastFlag,
+		expectedProtCount,
+		...p1,
+		...p2,
+		...new Uint8Array(20)
+	])
+
 	misc.asyncThrows(t, async function(){
-		await runTest(t, validateA1Any, createBadPacketLength)
+		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();
 })
 
 test('badPacketHeader1', async function (t) {
-	const expectedError = new Error('A2: Bad packet header. Expected 9 128, was 0 128')
+	const expectedError = new Error('A2: Bad packet header. Message type was: 0')
+	const badByte = 0
+	const expectedProtCount = 1
+
+	const p1 = [...'SCc2------'].map(letter=>letter.charCodeAt(0))
+	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
+	let a2 = new Uint8Array([
+		badByte,
+		LastFlag,
+		expectedProtCount,
+		...p1,
+		...p2,
+		...new Uint8Array(20)
+	])
+
 	misc.asyncThrows(t, async function(){
-		await runTest(t, validateA1Any, createBadPacketHeader1)
+		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();
 })
 
 test('badPacketHeader2', async function (t) {
-	const expectedError = new Error('A2: Bad packet header. Expected 9 128, was 9 0')
+	const expectedError = new Error('A2: Unsupported adress type: 0')
+	const badByte = 0
+	const expectedProtCount = 1
+
+	const p1 = [...'SCc2------'].map(letter=>letter.charCodeAt(0))
+	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
+	let a2 = new Uint8Array([
+		PacketTypeA2,
+		badByte,
+		expectedProtCount,
+		...p1,
+		...p2,
+		...new Uint8Array(20)
+	])
+
 	misc.asyncThrows(t, async function(){
-		await runTest(t, validateA1Any, createBadPacketHeader2)
+		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();
 })
 
 test('addressPub', async function (t) {
-	await runTest(t, validateA1Pub, create1Prot, serverSigKeyPair.publicKey)
+	let [a2, expectedProtCount] = create1Prot()
+	await runTest(t, validateA1Pub, a2, expectedProtCount, serverSigKeyPair.publicKey)
 	t.end();
 })
 
 test('noSuchServer', async function (t) {
 	const expectedError = new Error('A2: NoSuchServer exception')
+	let a2 = new Uint8Array([
+		PacketTypeA2,
+		129,
+		0
+	])
 	misc.asyncThrows(t, async function(){
-		await runTest(t, validateA1ZeroPub, createNoSuchServer, new Uint8Array(32))
+		await runTest(t, validateA1ZeroPub, a2, 0, new Uint8Array(32))
 	}, expectedError)
 	t.end();
 })
 
 test('badAdressType', async function (t) {
-	const expectedError = new Error('A1A2: Unsupported adress type: 2')
+	const expectedError = new Error('A2: Unsupported adress type: 68')
+	let a2 = new Uint8Array([PacketTypeA2, 68])
 	misc.asyncThrows(t, async function(){
-		await runTest(t, doNothing, doNothing, null)
+		await runTest(t, doNothing, a2, 0, null)
 	}, expectedError)
 	t.end();
 })
 
 test('badCharInP1', async function (t) {
-	const expectedError = new Error('A2: Invalid char in p1 " "')
+	const expectedError = new Error('A2: Invalid char in p1 "32"')
+	const expectedProtCount = 1
+
+	const p1 = [...'SCc2 -----'].map(letter=>letter.charCodeAt(0))
+	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
+	let a2 = new Uint8Array([
+		PacketTypeA2,
+		LastFlag,
+		expectedProtCount,
+		...p1,
+		...p2
+	])
+
 	misc.asyncThrows(t, async function(){
-		await runTest(t, validateA1Any, createBadCharInP1)
+		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();
 })
 
 test('badCharInP2', async function (t) {
-	const expectedError = new Error('A2: Invalid char in p2 " "')
+	const expectedError = new Error('A2: Invalid char in p2 "32"')
+	const expectedProtCount = 1
+
+	const p1 = [...'SCc2------'].map(letter=>letter.charCodeAt(0))
+	const p2 = [...'--- ------'].map(letter=>letter.charCodeAt(0))
+	let a2 = new Uint8Array([
+		PacketTypeA2,
+		LastFlag,
+		expectedProtCount,
+		...p1,
+		...p2
+	])
+
 	misc.asyncThrows(t, async function(){
-		await runTest(t, validateA1Any, createBadCharInP2)
+		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();
 })
 
 test('badCount1', async function (t) {
 	const expectedError = new Error('A2: Count must be in range [1, 127], was: 0')
+	const expectedProtCount = 0
+
+	let a2 = new Uint8Array([
+		PacketTypeA2,
+		LastFlag,
+		expectedProtCount
+	])
+
 	misc.asyncThrows(t, async function(){
-		await runTest(t, validateA1Any, createBadCount1)
+		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();
 })
 
 test('badCount2', async function (t) {
 	const expectedError  = new Error('A2: Count must be in range [1, 127], was: 128')
+	const expectedProtCount = 128
+
+	let a2 = new Uint8Array([
+		PacketTypeA2,
+		LastFlag,
+		expectedProtCount
+	])
+
 	misc.asyncThrows(t, async function(){
-		await runTest(t, validateA1Any, createBadCount2)
+		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();
 })
 
 //////////////////////////////////////////////////
 
-async function runTest(t, validateA1, createaA2, adress) {
+async function runTest(t, validateA1, a2, expectedProtCount, adress) {
 	let [mockSocket, testSocket] = misc.createMockSocket()
 	testSocket.setState(mockSocket.OPEN)
-	let [a2, expectedProtCount] = createaA2()
 
 	let serverPromise = async function(){
 		let a1 = await testSocket.receive(1000)
@@ -176,169 +297,6 @@ function create1Prot() {
 		expectedProtCount,
 		...p1,
 		...p2
-	])
-	return [a2, expectedProtCount]
-}
-
-/*
- * Creates an A2 message containing two protocol tuples
- */
-function create2Prots() {
-	const expectedProtCount = 2
-
-	const p11 = [...'SCv2------'].map(letter=>letter.charCodeAt(0))
-	const p12 = [...'-._AZaz9--'].map(letter=>letter.charCodeAt(0))
-	const p21 = [...'SCv3------'].map(letter=>letter.charCodeAt(0))
-	const p22 = [...'unicorns--'].map(letter=>letter.charCodeAt(0))
-
-	let a2 = new Uint8Array([
-		PacketTypeA2,
-		LastFlag,
-		expectedProtCount,
-		...p11,
-		...p12,
-		...p21,
-		...p22
-	])
-	return [a2, expectedProtCount]
-}
-
-/*
- * Creates an A2 message containing 127 protocol tuples
- */
-function create127Prots() {
-	const expectedProtCount = 127
-
-	const p1 = [...'SCv2------'].map(letter=>letter.charCodeAt(0))
-	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
-
-	let a2 = new Uint8Array([
-		PacketTypeA2,
-		LastFlag,
-		expectedProtCount,
-	])
-	for (let i = 0; i < 127; i++) {
-		a2 = new Uint8Array([
-			...a2,
-			...p1,
-			...p2
-		])
-	}
-	return [a2, expectedProtCount]
-}
-
-
-function createBadPacketLength() {
-	const expectedProtCount = 1
-
-	const p1 = [...'SCc2------'].map(letter=>letter.charCodeAt(0))
-	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
-
-	let a2 = new Uint8Array([
-		PacketTypeA2,
-		LastFlag,
-		expectedProtCount,
-		...p1,
-		...p2,
-		...new Uint8Array(20)
-	])
-	return [a2, expectedProtCount]
-}
-
-function createBadPacketHeader1() {
-	const badByte = 0
-	const expectedProtCount = 1
-
-	const p1 = [...'SCc2------'].map(letter=>letter.charCodeAt(0))
-	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
-
-	let a2 = new Uint8Array([
-		badByte,
-		LastFlag,
-		expectedProtCount,
-		...p1,
-		...p2,
-		...new Uint8Array(20)
-	])
-	return [a2, expectedProtCount]
-}
-
-function createBadPacketHeader2() {
-	const badByte = 0
-	const expectedProtCount = 1
-
-	const p1 = [...'SCc2------'].map(letter=>letter.charCodeAt(0))
-	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
-
-	let a2 = new Uint8Array([
-		PacketTypeA2,
-		badByte,
-		expectedProtCount,
-		...p1,
-		...p2,
-		...new Uint8Array(20)
-	])
-	return [a2, expectedProtCount]
-}
-
-
-function createNoSuchServer() {
-	let a2 = new Uint8Array([
-		PacketTypeA2,
-		129,
-		0
-	])
-	return [a2, expectedProtCount]
-}
-
-function createBadCharInP1() {
-	const expectedProtCount = 1
-
-	const p1 = [...'SCc2 -----'].map(letter=>letter.charCodeAt(0))
-	const p2 = [...'----------'].map(letter=>letter.charCodeAt(0))
-
-	let a2 = new Uint8Array([
-		PacketTypeA2,
-		LastFlag,
-		expectedProtCount,
-		...p1,
-		...p2
-	])
-	return [a2, expectedProtCount]
-}
-
-function createBadCharInP2() {
-	const expectedProtCount = 1
-
-	const p1 = [...'SCc2------'].map(letter=>letter.charCodeAt(0))
-	const p2 = [...'--- ------'].map(letter=>letter.charCodeAt(0))
-
-	let a2 = new Uint8Array([
-		PacketTypeA2,
-		LastFlag,
-		expectedProtCount,
-		...p1,
-		...p2
-	])
-	return [a2, expectedProtCount]
-}
-
-function createBadCount1() {
-	const expectedProtCount = 0
-	let a2 = new Uint8Array([
-		PacketTypeA2,
-		LastFlag,
-		expectedProtCount
-	])
-	return [a2, expectedProtCount]
-}
-
-function createBadCount2() {
-	const expectedProtCount = 128
-	let a2 = new Uint8Array([
-		PacketTypeA2,
-		LastFlag,
-		expectedProtCount
 	])
 	return [a2, expectedProtCount]
 }
