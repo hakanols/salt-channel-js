@@ -65,7 +65,7 @@ test('maxProts', async function (t) {
 	t.end();
 })
 test('nonInit', async function (t) {
-	const  expectedError = new Error('A1A2: Invalid internal state: a1a2')
+	const  expectedError = new Error('Invalid state: a1a2')
 	let [mockSocket, testSocket] = misc.createMockSocket()
 	testSocket.setState(mockSocket.OPEN)
 	let[a2, expectedProtCount] = create1Prot()
@@ -79,7 +79,7 @@ test('nonInit', async function (t) {
 
 	let a1a2Promise = sc.a1a2()
 
-	misc.asyncThrows(t, async function(){
+	await misc.asyncThrows(t, async function(){
 		await sc.a1a2()
 	}, expectedError)
 
@@ -105,7 +105,7 @@ test('badPacketLength', async function (t) {
 		...new Uint8Array(20)
 	])
 
-	misc.asyncThrows(t, async function(){
+	await misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();
@@ -127,7 +127,7 @@ test('badPacketHeader1', async function (t) {
 		...new Uint8Array(20)
 	])
 
-	misc.asyncThrows(t, async function(){
+	await misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();
@@ -149,7 +149,7 @@ test('badPacketHeader2', async function (t) {
 		...new Uint8Array(20)
 	])
 
-	misc.asyncThrows(t, async function(){
+	await misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();
@@ -168,7 +168,7 @@ test('noSuchServer', async function (t) {
 		129,
 		0
 	])
-	misc.asyncThrows(t, async function(){
+	await misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1ZeroPub, a2, 0, new Uint8Array(32))
 	}, expectedError)
 	t.end();
@@ -177,7 +177,7 @@ test('noSuchServer', async function (t) {
 test('badAdressType', async function (t) {
 	const expectedError = new Error('A2: Unsupported adress type: 68')
 	let a2 = new Uint8Array([PacketTypeA2, 68])
-	misc.asyncThrows(t, async function(){
+	await misc.asyncThrows(t, async function(){
 		await runTest(t, doNothing, a2, 0, null)
 	}, expectedError)
 	t.end();
@@ -197,7 +197,7 @@ test('badCharInP1', async function (t) {
 		...p2
 	])
 
-	misc.asyncThrows(t, async function(){
+	await misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();
@@ -217,7 +217,7 @@ test('badCharInP2', async function (t) {
 		...p2
 	])
 
-	misc.asyncThrows(t, async function(){
+	await misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();
@@ -233,7 +233,7 @@ test('badCount1', async function (t) {
 		expectedProtCount
 	])
 
-	misc.asyncThrows(t, async function(){
+	await misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();
@@ -249,7 +249,7 @@ test('badCount2', async function (t) {
 		expectedProtCount
 	])
 
-	misc.asyncThrows(t, async function(){
+	await misc.asyncThrows(t, async function(){
 		await runTest(t, validateA1Any, a2, expectedProtCount)
 	}, expectedError)
 	t.end();

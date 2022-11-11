@@ -64,7 +64,7 @@ export function typical_time_checker(getCurrentTime, threshold = 5000) {
 
 	function delayed(time) {
 		if (!epoch) {
-			start()
+			return true
 		}
 		let expectedTime = getCurrentTime() - epoch
 		return expectedTime > time + threshold
@@ -363,7 +363,13 @@ function handleM1(m1){
 	}
 
 	let time = getInt32(m1.slice(6, 10))
-	// ToDo check time
+	if (time == 0) {} // Skipp time check
+	else if (time == 1) {
+		timeChecker.start()
+	}
+	else {
+		throw new Error('M1: Invalid time value '+time)
+	}
 
 	return {
 		publicEphemeral: m1.slice(10, 42),
@@ -400,6 +406,9 @@ function createM3(sigKeyPair, storage, m1Hash, m2Hash, timeKeeper) {
 function handleM4(encryptedM4, storage, m1Hash, m2Hash, timeChecker) {
 
 	let m4 = decrypt(new Uint8Array(encryptedM4), storage).message
+	if (!m4) {
+		throw new Error('M4: Could not decrypt message')
+	}
 
 	if(!util.bufferEquals(m4.slice(0, 2), [PacketTypeM4, 0])){
 		throw new Error('M4: Check header: ' +m4.slice(0, 2) + ' Expected: ' + [PacketTypeM4, 0])
@@ -664,8 +673,12 @@ function handleM2(m2, timeChecker) {
 
 	// Time
 	let time = getInt32(m2.slice(2, 6))
-	if (timeChecker.delayed(time)) {
-		throw new Error('M2: Detected delayed packet')
+	if (time == 0) {}// Skipp time keeping
+	else if (time == 1) {
+		timeChecker.start()
+	}
+	else {
+		throw new Error('M2: Invalid time value '+time)
 	}
 
 	let serverPub = m2.slice(6, 38)
@@ -675,7 +688,7 @@ function handleM2(m2, timeChecker) {
 function handleM3(rawM3, storage, m1Hash, m2Hash, timeChecker) {
 	let m3 = decrypt(rawM3, storage).message
 	if (!m3) {
-		throw new Error('EncryptedMessage: Could not decrypt message')
+		throw new Error('M3: Could not decrypt message')
 	}
 	// Header
 	if (!validHeader(m3, PacketTypeM3, 0)) {
@@ -740,6 +753,9 @@ export function client (webSocket, timeKeeper, timeChecker) {
 
 	async function receive(waitTime){
 		try{
+			if (saltState in [STATE_READY, STATE_LAST]) {
+				throw new Error('Invalid state: ' + saltState)
+			}
 			let message = messageQueue.shift();
 			if (message == undefined){
 				if (saltState !== STATE_READY) {
@@ -815,7 +831,7 @@ export function client (webSocket, timeKeeper, timeChecker) {
 	async function a1a2(adress) {
 		try{
 			if (saltState !== STATE_INIT) {
-				throw new Error('A1A2: Invalid internal state: ' + saltState)
+				throw new Error('Invalid state: ' + saltState)
 			}
 			saltState = STATE_A1A2
 			let a1 = createA1(adress)
@@ -832,7 +848,7 @@ export function client (webSocket, timeKeeper, timeChecker) {
 	async function handshake(sigKeyPair, ephKeyPair, hostSigPub) {
 		try{			
 			if (saltState !== STATE_INIT) {
-				throw new Error('Handshake: Invalid internal state: ' + saltState)
+				throw new Error('Invalid state: ' + saltState)
 			}
 			saltState = STATE_HAND
 
@@ -898,6 +914,9 @@ export function server(webSocket, timeKeeper, timeChecker) {
 
 	async function receive(waitTime){
 		try{
+			if (saltState !== STATE_READY) {
+				throw new Error('Invalid state: ' + saltState)
+			}
 			let message = messageQueue.shift();
 			if (message == undefined){
 				if (saltState !== STATE_READY) {
@@ -973,7 +992,7 @@ export function server(webSocket, timeKeeper, timeChecker) {
 	async function runA1A2(protocols, waitTime) {
 		try{
 			if (saltState !== STATE_INIT) {
-				throw new Error('Handshake: Invalid internal state: ' + saltState)
+				throw new Error('Invalid state: ' + saltState)
 			}
 			saltState = STATE_A1A2
 
@@ -1013,7 +1032,7 @@ export function server(webSocket, timeKeeper, timeChecker) {
 			verifySigKeyPair(sigKeyPair)
 			verifyEphKeyPair(ephKeyPair)
 			if (saltState !== STATE_INIT) {
-				throw new Error('Handshake: Invalid internal state: ' + saltState)
+				throw new Error('Invalid state: ' + saltState)
 			}
 			saltState = STATE_HAND
 			let m1Return = handleM1(m1)

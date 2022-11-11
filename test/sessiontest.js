@@ -73,7 +73,7 @@ test('session1', async function (t) {
 		testSocket.send(session1EchoBytes)
 	}()
 
-	let sc = saltChannel.client(mockSocket, saltChannel.null_time_keeper())
+	let sc = saltChannel.client(mockSocket, saltChannel.null_time_keeper(), saltChannel.null_time_checker())
 
 	let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair)
 	channel.send(false, request)
@@ -166,7 +166,7 @@ test('session4', async function (t) {
 		testSocket.send(session4EchoBytes)
 	}()
 
-	let sc = saltChannel.client(mockSocket, saltChannel.null_time_keeper())
+	let sc = saltChannel.client(mockSocket, saltChannel.null_time_keeper(), saltChannel.null_time_checker())
 
 	let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey)
 	channel.send(false, request)

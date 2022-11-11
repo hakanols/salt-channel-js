@@ -47,7 +47,7 @@ test('serverSession1', async function (t) {
 		t.arrayEqual(new Uint8Array(app), session1EchoBytes, 'Check App')
 	}()
 
-	let sc = saltChannel.server(mockSocket, saltChannel.null_time_keeper())
+	let sc = saltChannel.server(mockSocket, saltChannel.null_time_keeper(), saltChannel.null_time_checker())
 
 	const VERSION = [...'SCv2'].map(letter=>letter.charCodeAt(0))
 	let {protocol, message} = await sc.runA1A2([VERSION], 1000)
