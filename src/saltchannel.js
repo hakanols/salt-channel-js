@@ -228,15 +228,31 @@ function setUint16(number) {
 }
 
 function extactMessages(args){
-	if (args.length === 2) {
+	let last = false
+	let messages;
+	if (args.length === 1) {
 		if (util.isArray(args[1])) {
-			return args[1]
+			messages = args[0]
 		} else {
-			return [args[1]]
+			messages = [args[0]]
 		}
 	}
 	else {
-		return args.slice(1)
+		last = args[0]
+		if (args.length === 2) {
+			if (util.isArray(args[1])) {
+				messages = args[1]
+			} else {
+				messages = [args[1]]
+			}
+		}
+		else {
+			messages = args.slice(1)
+		}
+	}
+	return {
+		messages: messages,
+		last: last
 	}
 }
 
@@ -343,7 +359,7 @@ function increaseNonce2(nonce) {
 	return nonce
 }
 
-function handleM1(m1){
+function handleM1(m1, timeChecker){
 	if (6 >= m1.length){
 		throw new Error('M1 Length: To short massage. Length is '+ m1.length)
 	} 
@@ -557,7 +573,7 @@ function handleMessage(bytes, storage, timeChecker) {
 		throw new Error('(Multi)AppPacket: Detected a delayed packet')
 	}
 
-	let messages
+	let messages = new Uint8Array();
 	if (validHeader(rawMessage, PacketTypeApp, 0)) {
 		messages = handleAppPacket(rawMessage)
 	} else if (validHeader(rawMessage, PacketTypeMultiApp, 0)) {
@@ -775,7 +791,7 @@ export function client (webSocket, timeKeeper, timeChecker) {
 				close()
 			}
 			return {
-				message: message.buffer, // ToDo What if message is undefined
+				message: message,
 				close: saltState == STATE_CLOSED
 			}
 		}
@@ -784,16 +800,16 @@ export function client (webSocket, timeKeeper, timeChecker) {
 		}
 	}
 
-	function send(last){
+	function send(){
 		try{
 			if (saltState !== STATE_READY) {
 				throw new Error('Invalid state: ' + saltState)
 			}
+			let {messages, last} = extactMessages(Array.from(arguments))
 			if (last) {
 				saltState = STATE_LAST
 			}
 
-			let messages = extactMessages(Array.from(arguments))
 			messages = validateAndFix(messages)
 			if (messages.length === 1) {
 				socket.send( sendAppPacket(last, messages[0], storage, timeKeeper))
@@ -936,7 +952,7 @@ export function server(webSocket, timeKeeper, timeChecker) {
 				close()
 			}
 			return {
-				message: message.buffer, // ToDo What if message is undefined
+				message: message,
 				close: saltState == STATE_CLOSED
 			}
 		}
@@ -945,16 +961,16 @@ export function server(webSocket, timeKeeper, timeChecker) {
 		}
 	}
 
-	function send(last){
+	function send(){
 		try{
 			if (saltState !== STATE_READY) {
 				throw new Error('Invalid state: ' + saltState)
 			}
+			let {messages, last} = extactMessages(Array.from(arguments))
 			if (last) {
 				saltState = STATE_LAST
 			}
 
-			let messages = extactMessages(Array.from(arguments))
 			messages = validateAndFix(messages)
 			if (messages.length === 1) {
 				socket.send( sendAppPacket(last, messages[0], storage, timeKeeper))
@@ -1035,7 +1051,7 @@ export function server(webSocket, timeKeeper, timeChecker) {
 				throw new Error('Invalid state: ' + saltState)
 			}
 			saltState = STATE_HAND
-			let m1Return = handleM1(m1)
+			let m1Return = handleM1(m1, timeChecker)
 			if (!(m1Return.serverSigKey != null && !util.bufferEquals(m1Return.serverSigKey, sigKeyPair.publicKey))) {
 				throw new Error('Handshake: Client try to to connect to missing singKeyPair')
 			}

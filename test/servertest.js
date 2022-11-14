@@ -54,7 +54,7 @@ test('serverSession1', async function (t) {
 	t.arrayEqual(VERSION, protocol, 'Check protocol')
 	let channel = await sc.handshake(message, serverSigKeyPair, serverEphKeyPair)
 	let event = await channel.receive(1000)
-	t.arrayEqual(new Uint8Array(event.message), request, 'Check echo')
+	t.arrayEqual(event.message, request, 'Check echo')
 	channel.send(true, request)
 
 	await clientPromise;

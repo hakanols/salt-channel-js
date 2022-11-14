@@ -98,8 +98,8 @@ test('receiveAppPacket', async function (t) {
 	testInterface.send(encrypted)
 
 	let event = await channel.receive(1000)
-	t.ok((event.message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
-	t.arrayEqual(new Uint8Array(event.message), new Uint8Array(1), 'Unexpected data')
+	t.ok((event.message instanceof Uint8Array), 'Expected Uint8Array from Salt Channel');
+	t.arrayEqual(event.message, new Uint8Array(1), 'Unexpected data')
 	t.notOk(event.close,'Expected open');
 
 	t.end();
@@ -145,11 +145,11 @@ test('receiveMultiAppPacket', async function (t) {
 	let event1 = await channel.receive(1000)
 	let event2 = await channel.receive(1000)
 
-	t.ok((event1.message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
+	t.ok((event1.message instanceof Uint8Array), 'Expected Uint8Array from Salt Channel')
 	t.arrayEqual(new Uint8Array(event1.message), new Uint8Array([0]), 'Unexpected data')
 	t.notOk(event1.close,'Expected open');
 
-	t.ok((event2.message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
+	t.ok((event2.message instanceof Uint8Array), 'Expected Uint8Array from Salt Channel')
 	t.arrayEqual(new Uint8Array(event2.message), new Uint8Array([1]), 'Unexpected data')
 	t.notOk(event2.close,'Expected open');
 
@@ -198,8 +198,9 @@ test('receiveDelayed', async function (t) {
 	let [mockSocketInterface, testInterface] = misc.createMockSocket()
 	testInterface.setState(mockSocketInterface.OPEN)
 
+	let timeKeeper = saltChanne.typical_time_keeper(util.currentTimeMs)
 	let timeChecker = saltChanne.typical_time_checker(util.currentTimeMs, 10)
-	let sc = saltChanne.client(mockSocketInterface, undefined, timeChecker)
+	let sc = saltChanne.client(mockSocketInterface, timeKeeper, timeChecker)
 
 	const threshold = 20
 	let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey, undefined, threshold)
@@ -242,8 +243,8 @@ test('receiveLastFlag', async function (t) {
 	testInterface.send(encrypted)
 
 	let event = await channel.receive(1000)
-	t.ok((event.message instanceof ArrayBuffer),'Expected ArrayBuffer from Salt Channel');
-	t.arrayEqual(new Uint8Array(event.message), new Uint8Array(1), 'Expected 1 zero byte, was ' + util.ab2hex(event.message));
+	t.ok((event.message instanceof Uint8Array), 'Expected Uint8Array from Salt Channel');
+	t.arrayEqual(event.message, new Uint8Array(1), 'Expected 1 zero byte, was ' + util.ab2hex(event.message));
 	t.ok(event.close,'Expected closed');
 
 	console.log('## stateAfterReceivedLastFlag')
@@ -696,7 +697,7 @@ function validateAppPacket(t, serverData, message, expectedData, lastFlag) {
 }
 
 function validateMultiAppPacket(t, serverData, message, expectedData, lastFlag) {
-	 t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
+	t.ok((message instanceof ArrayBuffer), 'Expected ArrayBuffer from Salt Channel')
 
 	let encryptedMessage = new Uint8Array(message)
 	let {data, last} = decrypt(serverData, encryptedMessage)

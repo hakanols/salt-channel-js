@@ -78,7 +78,7 @@ test('session1', async function (t) {
 	let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair)
 	channel.send(false, request)
 	let event = await channel.receive(1000)
-	t.arrayEqual(new Uint8Array(event.message), request, 'Check echo')
+	t.arrayEqual(event.message, request, 'Check echo')
 
 	await serverPromise;
 	t.end();
@@ -171,7 +171,7 @@ test('session4', async function (t) {
 	let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair, serverSigKeyPair.publicKey)
 	channel.send(false, request)
 	let event = await channel.receive(1000)
-	t.arrayEqual(new Uint8Array(event.message), request, 'Check echo')
+	t.arrayEqual(event.message, request, 'Check echo')
 
 	await serverPromise;
 	t.end();
