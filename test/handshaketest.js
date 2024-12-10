@@ -202,7 +202,7 @@ test('receiveDelayed', async function (t) {
 	let timeChecker = saltChanne.typical_time_checker(util.currentTimeMs, 10)
 	let sc = saltChanne.client(mockSocketInterface, timeKeeper, timeChecker)
 
-	const threshold = 20
+	const threshold = 2
 	let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey, undefined, threshold)
 
 	let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
@@ -212,7 +212,7 @@ test('receiveDelayed', async function (t) {
 	await serverPromise;
 
 	let appPacket = createAppPacket(testInterface.serverData, [0])
-	appPacket[2] = 8 // Time
+	appPacket[2] = 0 // Time
 	appPacket[3] = 0
 	appPacket[4] = 0
 	appPacket[5] = 0
