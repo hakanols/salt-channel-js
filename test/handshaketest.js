@@ -199,10 +199,10 @@ test('receiveDelayed', async function (t) {
 	testInterface.setState(mockSocketInterface.OPEN)
 
 	let timeKeeper = saltChanne.typical_time_keeper(util.currentTimeMs)
-	let timeChecker = saltChanne.typical_time_checker(util.currentTimeMs, 5)
+	let timeChecker = saltChanne.typical_time_checker(util.currentTimeMs, 10)
 	let sc = saltChanne.client(mockSocketInterface, timeKeeper, timeChecker)
 
-	let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey, undefined, 2)
+	let serverPromise = testServerSide(t, testInterface, clientEphKeyPair.publicKey, undefined, 30)
 
 	let channel = await sc.handshake(clientSigKeyPair, clientEphKeyPair, undefined);
 
@@ -216,6 +216,7 @@ test('receiveDelayed', async function (t) {
 	appPacket[4] = 0
 	appPacket[5] = 0
 
+	await util.sleep(20)
 	let encrypted = encrypt(testInterface.serverData, appPacket)
 	testInterface.send(encrypted)
 
