@@ -1,7 +1,7 @@
 # salt-channel-js
 A JavaScript implementation of a Salt Channel client. Client-side code that connects on top of WebSocket.
 Works with both on browser and NodeJS
-Salt Channel is based on [TweetNaCl](http://tweetnacl.cr.yp.to/) and 
+Salt Channel is based on [TweetNaCl](http://tweetnacl.cr.yp.to/) and the [reference implementation of SaltChannel](https://github.com/assaabloy-ppi/salt-channel/)
 
 ## Dependencies
 * SaltChannel.js uses [TweetNaCl-es6.js](https://github.com/hakanols/tweetnacl-es6) which has no dependencies.
